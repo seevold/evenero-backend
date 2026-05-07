@@ -1,52 +1,27 @@
-import { createTransport } from 'nodemailer';
-import type { Transporter } from 'nodemailer';
 import { translateEmail as te } from './i18n';
 import type { SupportedLocale } from './i18n';
 
-// SMTP configuration - all values from environment variables (no hard-coded defaults for security)
-function getSmtpConfig() {
-  const host = process.env.SMTP_HOST;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASSWORD;
-  const fromEmail = process.env.SMTP_FROM;
-  
-  if (!host || !user || !pass || !fromEmail) {
-    console.warn('SMTP configuration incomplete. Required: SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM');
+// Mailgun-konfig — alle verdier fra env-vars
+function getMailgunConfig() {
+  const apiKey = process.env.MAILGUN_API_KEY || "";
+  const domain = process.env.MAILGUN_DOMAIN || "www.evenero.com";
+  const baseUrl = process.env.MAILGUN_API_BASE || "https://api.eu.mailgun.net/v3";
+  const fromAddress = process.env.MAILGUN_FROM || `noreply@${domain}`;
+  const fromName = process.env.MAILGUN_FROM_NAME || "Evenero";
+
+  if (!apiKey) {
+    console.warn("[EMAIL] MAILGUN_API_KEY not set — emails vil bare logges, ikke sendes");
   }
-  
-  const emailAddress = fromEmail || 'noreply@evenero.com';
-  const fromWithName = `Evenero <${emailAddress}>`;
-  
+
   return {
-    host: host || '',
-    port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: false,
-    auth: {
-      user: user || '',
-      pass: pass || ''
-    },
-    from: fromWithName
+    apiKey,
+    domain,
+    baseUrl,
+    from: `${fromName} <${fromAddress}>`,
   };
 }
 
-const smtpConfig = getSmtpConfig();
-
-let transporter: Transporter | null = null;
-
-function getTransporter(): Transporter {
-  if (!transporter) {
-    transporter = createTransport({
-      host: smtpConfig.host,
-      port: smtpConfig.port,
-      secure: smtpConfig.secure,
-      auth: {
-        user: smtpConfig.auth.user,
-        pass: smtpConfig.auth.pass
-      }
-    });
-  }
-  return transporter as Transporter;
-}
+const mailgunConfig = getMailgunConfig();
 
 const BIRD_NAMES = [
   'Eagle', 'Sparrow', 'Robin', 'Cardinal', 'Bluejay', 'Owl', 'Hawk', 'Falcon',
@@ -77,32 +52,51 @@ export async function sendEmail(
   html?: string,
 ): Promise<boolean> {
   const { actualTo, isRerouted } = applyStagingWhitelist(to);
+  const finalSubject = isRerouted ? `[STAGING→${to}] ${subject}` : subject;
 
-  if (!smtpConfig.auth.pass) {
-    console.warn("[EMAIL] SMTP password not configured — printing to log instead");
+  if (!mailgunConfig.apiKey) {
+    console.warn("[EMAIL] MAILGUN_API_KEY ikke satt — logger i stedet for å sende");
     console.log(`[EMAIL] To: ${actualTo}${isRerouted ? ` (rerouted from ${to})` : ""}`);
-    console.log(`[EMAIL] Subject: ${subject}`);
+    console.log(`[EMAIL] Subject: ${finalSubject}`);
     if (text) console.log(`[EMAIL] Text: ${text.substring(0, 200)}…`);
     return true;
   }
 
   try {
-    const mailTransporter = getTransporter();
-    const info = await mailTransporter.sendMail({
-      from: smtpConfig.from,
-      to: actualTo,
-      subject: isRerouted ? `[STAGING→${to}] ${subject}` : subject,
-      text,
-      html,
-      headers: isRerouted ? { "X-Original-To": to } : undefined,
+    const form = new URLSearchParams();
+    form.append("from", mailgunConfig.from);
+    form.append("to", actualTo);
+    form.append("subject", finalSubject);
+    if (text) form.append("text", text);
+    if (html) form.append("html", html);
+    if (isRerouted) form.append("h:X-Original-To", to);
+
+    const url = `${mailgunConfig.baseUrl}/${mailgunConfig.domain}/messages`;
+    const auth = Buffer.from(`api:${mailgunConfig.apiKey}`).toString("base64");
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: form.toString(),
+      signal: AbortSignal.timeout(30_000),
     });
+
+    if (!response.ok) {
+      const body = await response.text();
+      console.error(`[EMAIL] Mailgun ${response.status}: ${body.substring(0, 300)}`);
+      return false;
+    }
+
+    const data = (await response.json()) as { id?: string; message?: string };
     console.log(
-      `[EMAIL] Sent ${info.messageId} to ${actualTo}${isRerouted ? ` (rerouted from ${to})` : ""}`,
+      `[EMAIL] Sent ${data.id || "(no id)"} to ${actualTo}${isRerouted ? ` (rerouted from ${to})` : ""}`,
     );
     return true;
-  } catch (error) {
-    console.error("[EMAIL] Failed to send via SMTP:", error);
-    console.log(`[EMAIL] Failed: to=${actualTo} subject="${subject}"`);
+  } catch (error: any) {
+    console.error("[EMAIL] Failed to send via Mailgun:", error?.message || error);
     return false;
   }
 }
