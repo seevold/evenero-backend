@@ -1,0 +1,68 @@
+{
+  "common": {
+    "greeting": "Hi {{name}}",
+    "greetingNoName": "Hi there",
+    "footer": "Best regards,\nThe Evenero Team",
+    "unsubscribe": "Unsubscribe from these emails",
+    "viewOnline": "View in browser"
+  },
+  "pinCode": {
+    "subject": "Your Evenero login code",
+    "title": "Your login code",
+    "body": "Use this code to log in to Evenero:",
+    "code": "{{code}}",
+    "expiry": "This code expires in 10 minutes.",
+    "ignore": "If you didn't request this code, you can safely ignore this email."
+  },
+  "coHostInvite": {
+    "subject": "🎉 You're invited to co-host {{eventName}}!",
+    "title": "You're a Co-Host!",
+    "body": "{{inviterName}} has invited you to help manage their event on Evenero.",
+    "whatIsEvenero": "Evenero is a photo & video sharing platform that helps collect memories from weddings, parties, and special events. Guests can upload their photos, and everyone can enjoy a shared gallery of the best moments.",
+    "description": "As a co-host, you can manage the event, view all uploads, moderate content, and download the complete photo collection. Your help is valuable!",
+    "permissions": "What you can do as co-host:",
+    "permissionsList": "• View and download all photos & videos\n• Approve or remove uploads\n• Access event settings\n• See the live slideshow",
+    "acceptButton": "View Event Gallery",
+    "dashboardNote": "After logging in, you'll find this event on your dashboard.",
+    "ignore": "If you don't recognize the sender, you can safely ignore this email."
+  },
+  "eventReminder": {
+    "subject": "📸 Time to share your photos from {{eventName}}!",
+    "title": "Ready to share your memories?",
+    "body": "You set a reminder to upload and view photos from \"{{eventName}}\". The gallery is live and waiting for your photos!",
+    "uploadPrompt": "Share your photos and videos from the event - help create a complete memory collection that everyone can enjoy.",
+    "viewOthers": "See what others have already shared in the gallery and discover moments you might have missed!",
+    "viewGallery": "View & Upload Photos",
+    "galleryLink": "Gallery link:",
+    "downloadHint": "You can download photos one at a time from the gallery."
+  },
+  "reminderConfirmation": {
+    "subject": "Reminder set for {{eventName}}",
+    "title": "Reminder confirmed!",
+    "body": "We'll send you a reminder with the gallery link for \"{{eventName}}\".",
+    "scheduledFor": "You'll receive your reminder on {{date}}.",
+    "galleryLink": "In the meantime, you can view the gallery here:",
+    "viewGalleryButton": "View Gallery",
+    "changeReminder": "Changed your mind? Just ignore the reminder email when it arrives."
+  },
+  "zipReady": {
+    "subject": "Your photo download is ready",
+    "title": "Your download is ready",
+    "body": "Your photo collection from \"{{eventName}}\" has been packaged and is ready for download.",
+    "downloadButton": "Download photos",
+    "expiry": "This download link expires in 24 hours.",
+    "size": "Total size: {{size}}"
+  },
+  "welcome": {
+    "subject": "Welcome to Evenero!",
+    "title": "Welcome to Evenero",
+    "body": "Thanks for joining Evenero! We're excited to help you collect and share memories from your events.",
+    "getStarted": "Get started",
+    "features": {
+      "title": "What you can do:",
+      "create": "Create events for weddings, parties, and more",
+      "collect": "Collect photos from all your guests",
+      "share": "Share beautiful galleries with everyone"
+    }
+  }
+}

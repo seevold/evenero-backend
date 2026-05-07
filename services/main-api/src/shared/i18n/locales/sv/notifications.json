@@ -1,0 +1,76 @@
+{
+  "toast": {
+    "success": {
+      "saved": "Ändringar sparade",
+      "copied": "Kopierat till urklipp",
+      "uploaded": "Uppladdning klar",
+      "deleted": "Raderat",
+      "sent": "Skickat",
+      "created": "Skapat",
+      "updated": "Uppdaterat"
+    },
+    "error": {
+      "generic": "Något gick fel",
+      "saveFailed": "Kunde inte spara ändringar",
+      "uploadFailed": "Uppladdning misslyckades",
+      "deleteFailed": "Kunde inte radera",
+      "networkError": "Nätverksfel",
+      "unauthorized": "Du har inte behörighet"
+    },
+    "info": {
+      "processing": "Bearbetar...",
+      "uploading": "Laddar upp..."
+    }
+  },
+  "events": {
+    "created": "Evenemang skapat",
+    "createdDesc": "Ditt evenemang har skapats. Aktivera det för att börja samla bilder.",
+    "createdAndActivated": "Evenemang skapat och aktiverat!",
+    "createdAndActivatedDesc": "Ditt evenemang är nu redo att ta emot bilder.",
+    "createdActivationFailed": "Evenemang skapat",
+    "createdActivationFailedDesc": "Evenemanget skapades men aktiveringen misslyckades. Du kan aktivera det senare.",
+    "updated": "Evenemang uppdaterat",
+    "deleted": "Evenemang raderat",
+    "activated": "Evenemang aktiverat! Ditt galleri är nu tillgängligt.",
+    "coHostAdded": "Medvärdinbjudan skickad",
+    "coHostRemoved": "Medvärd borttagen",
+    "pinUpdated": "PIN uppdaterad",
+    "coverUpdated": "Omslagsbild uppdaterad"
+  },
+  "upload": {
+    "started": "Startar uppladdning...",
+    "progress": "Laddar upp {{current}} av {{total}}...",
+    "complete": "{{count}} filer uppladdade",
+    "failed": "{{count}} filer misslyckades",
+    "partialSuccess": "{{success}} uppladdade, {{failed}} misslyckades"
+  },
+  "download": {
+    "started": "Förbereder nedladdning...",
+    "zipCreating": "Skapar zip-fil. Vi skickar dig e-post när den är klar.",
+    "zipCreatingTitle": "E-post på väg!",
+    "zipCreatingDesc": "Vi skapar en zip-fil med {{count}} bilder. Du får ett e-postmeddelande med nedladdningslänken om {{time}}.",
+    "complete": "Nedladdning startad",
+    "failed": "Nedladdning misslyckades"
+  },
+  "gallery": {
+    "imagesArchived": "Bilder arkiverade",
+    "imagesArchivedDesc": "{{count}} bilder har arkiverats",
+    "archiveFailed": "Kunde inte arkivera bilder",
+    "archiveFailedDesc": "Försök igen"
+  },
+  "auth": {
+    "loggedIn": "Inloggad",
+    "loggedOut": "Utloggad",
+    "codeSent": "Verifieringskod skickad till {{email}}",
+    "codeInvalid": "Ogiltig kod. Försök igen.",
+    "codeExpired": "Koden har gått ut. Begär en ny.",
+    "pinSent": "PIN-kod skickad",
+    "pinSentDesc": "Kolla din e-post efter 6-siffrig PIN-kod.",
+    "welcome": "Välkommen!",
+    "welcomeDesc": "Du är nu inloggad.",
+    "invalidPin": "Ogiltig PIN",
+    "invalidPinDesc": "PIN-koden du angav är fel.",
+    "sendPinFailed": "Kunde inte skicka PIN-kod. Försök igen.",
+    "unexpectedError": "Ett oväntat fel uppstod. Försök igen."
+  }
+}

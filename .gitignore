@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+.DS_Store
+.idea/
+.vscode/
+*.log
+npm-debug.log*
+.npm/
+package-lock.json.bak

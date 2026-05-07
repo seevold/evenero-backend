@@ -1,0 +1,76 @@
+{
+  "toast": {
+    "success": {
+      "saved": "Endringer lagret",
+      "copied": "Kopiert til utklippstavlen",
+      "uploaded": "Opplasting fullført",
+      "deleted": "Slettet",
+      "sent": "Sendt",
+      "created": "Opprettet",
+      "updated": "Oppdatert"
+    },
+    "error": {
+      "generic": "Noe gikk galt",
+      "saveFailed": "Kunne ikke lagre endringer",
+      "uploadFailed": "Opplasting feilet",
+      "deleteFailed": "Kunne ikke slette",
+      "networkError": "Nettverksfeil",
+      "unauthorized": "Du har ikke tillatelse"
+    },
+    "info": {
+      "processing": "Behandler...",
+      "uploading": "Laster opp..."
+    }
+  },
+  "events": {
+    "created": "Arrangement opprettet",
+    "createdDesc": "Arrangementet ditt er opprettet. Aktiver det for å begynne å samle bilder.",
+    "createdAndActivated": "Arrangement opprettet og aktivert!",
+    "createdAndActivatedDesc": "Arrangementet ditt er nå klart til å motta bilder.",
+    "createdActivationFailed": "Arrangement opprettet",
+    "createdActivationFailedDesc": "Arrangementet ble opprettet, men aktivering feilet. Du kan aktivere det senere.",
+    "updated": "Arrangement oppdatert",
+    "deleted": "Arrangement slettet",
+    "activated": "Arrangement aktivert! Galleriet ditt er nå tilgjengelig.",
+    "coHostAdded": "Medvertinvitasjon sendt",
+    "coHostRemoved": "Medvert fjernet",
+    "pinUpdated": "PIN oppdatert",
+    "coverUpdated": "Forsidebilde oppdatert"
+  },
+  "upload": {
+    "started": "Starter opplasting...",
+    "progress": "Laster opp {{current}} av {{total}}...",
+    "complete": "{{count}} filer lastet opp",
+    "failed": "{{count}} filer feilet",
+    "partialSuccess": "{{success}} lastet opp, {{failed}} feilet"
+  },
+  "download": {
+    "started": "Forbereder nedlasting...",
+    "zipCreating": "Oppretter zip-fil. Vi sender deg e-post når den er klar.",
+    "zipCreatingTitle": "E-post på vei!",
+    "zipCreatingDesc": "Vi lager en zip-fil med {{count}} bilder. Du får en e-post med nedlastingslenken om {{time}}.",
+    "complete": "Nedlasting startet",
+    "failed": "Nedlasting feilet"
+  },
+  "gallery": {
+    "imagesArchived": "Bilder arkivert",
+    "imagesArchivedDesc": "{{count}} bilder har blitt arkivert",
+    "archiveFailed": "Kunne ikke arkivere bilder",
+    "archiveFailedDesc": "Prøv igjen"
+  },
+  "auth": {
+    "loggedIn": "Logget inn",
+    "loggedOut": "Logget ut",
+    "codeSent": "Bekreftelseskode sendt til {{email}}",
+    "codeInvalid": "Ugyldig kode. Prøv igjen.",
+    "codeExpired": "Koden har utløpt. Be om en ny.",
+    "pinSent": "PIN-kode sendt",
+    "pinSentDesc": "Sjekk e-posten din for 6-sifret PIN-kode.",
+    "welcome": "Velkommen!",
+    "welcomeDesc": "Du er nå logget inn.",
+    "invalidPin": "Ugyldig PIN",
+    "invalidPinDesc": "PIN-koden du skrev inn er feil.",
+    "sendPinFailed": "Kunne ikke sende PIN-kode. Prøv igjen.",
+    "unexpectedError": "En uventet feil oppstod. Prøv igjen."
+  }
+}

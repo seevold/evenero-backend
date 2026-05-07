@@ -1,0 +1,68 @@
+{
+  "common": {
+    "greeting": "Hei {{name}}",
+    "greetingNoName": "Hei",
+    "footer": "Med vennlig hilsen,\nEvenero-teamet",
+    "unsubscribe": "Meld deg av disse e-postene",
+    "viewOnline": "Vis i nettleser"
+  },
+  "pinCode": {
+    "subject": "Din Evenero-innloggingskode",
+    "title": "Din innloggingskode",
+    "body": "Bruk denne koden for å logge inn på Evenero:",
+    "code": "{{code}}",
+    "expiry": "Denne koden utløper om 10 minutter.",
+    "ignore": "Hvis du ikke ba om denne koden, kan du trygt ignorere denne e-posten."
+  },
+  "coHostInvite": {
+    "subject": "🎉 Du er invitert som medvert for {{eventName}}!",
+    "title": "Du er medvert!",
+    "body": "{{inviterName}} har invitert deg til å hjelpe med å administrere arrangementet sitt på Evenero.",
+    "whatIsEvenero": "Evenero er en plattform for deling av bilder og videoer som hjelper med å samle minner fra bryllup, fester og spesielle anledninger. Gjester kan laste opp sine bilder, og alle kan nyte et felles galleri med de beste øyeblikkene.",
+    "description": "Som medvert kan du administrere arrangementet, se alle opplastinger, moderere innhold og laste ned hele bildesamlingen. Din hjelp er verdifull!",
+    "permissions": "Hva du kan gjøre som medvert:",
+    "permissionsList": "• Se og laste ned alle bilder og videoer\n• Godkjenne eller fjerne opplastinger\n• Få tilgang til arrangementsinnstillinger\n• Se live-bildespillet",
+    "acceptButton": "Se arrangementsgalleriet",
+    "dashboardNote": "Etter innlogging finner du arrangementet på dashbordet ditt.",
+    "ignore": "Hvis du ikke kjenner avsenderen, kan du trygt ignorere denne e-posten."
+  },
+  "eventReminder": {
+    "subject": "📸 Tid for å dele bildene dine fra {{eventName}}!",
+    "title": "Klar til å dele minnene dine?",
+    "body": "Du satte en påminnelse om å laste opp og se bilder fra «{{eventName}}». Galleriet er live og venter på bildene dine!",
+    "uploadPrompt": "Del dine bilder og videoer fra arrangementet - bidra til en komplett minnesamling som alle kan glede seg over.",
+    "viewOthers": "Se hva andre allerede har delt i galleriet og oppdag øyeblikk du kanskje gikk glipp av!",
+    "viewGallery": "Se & last opp bilder",
+    "galleryLink": "Gallerilenke:",
+    "downloadHint": "Du kan laste ned bilder ett om gangen fra galleriet."
+  },
+  "reminderConfirmation": {
+    "subject": "Påminnelse satt for {{eventName}}",
+    "title": "Påminnelse bekreftet!",
+    "body": "Vi sender deg en påminnelse med gallerilenken for «{{eventName}}».",
+    "scheduledFor": "Du mottar påminnelsen din {{date}}.",
+    "galleryLink": "I mellomtiden kan du se galleriet her:",
+    "viewGalleryButton": "Se galleri",
+    "changeReminder": "Ombestemte deg? Bare ignorer påminnelses-e-posten når den kommer."
+  },
+  "zipReady": {
+    "subject": "Bildenedlastingen din er klar",
+    "title": "Nedlastingen din er klar",
+    "body": "Bildesamlingen din fra «{{eventName}}» er pakket og klar for nedlasting.",
+    "downloadButton": "Last ned bilder",
+    "expiry": "Denne nedlastingslenken utløper om 24 timer.",
+    "size": "Total størrelse: {{size}}"
+  },
+  "welcome": {
+    "subject": "Velkommen til Evenero!",
+    "title": "Velkommen til Evenero",
+    "body": "Takk for at du ble med i Evenero! Vi gleder oss til å hjelpe deg med å samle og dele minner fra dine arrangementer.",
+    "getStarted": "Kom i gang",
+    "features": {
+      "title": "Hva du kan gjøre:",
+      "create": "Opprett arrangementer for bryllup, fester og mer",
+      "collect": "Samle bilder fra alle gjestene dine",
+      "share": "Del vakre gallerier med alle"
+    }
+  }
+}

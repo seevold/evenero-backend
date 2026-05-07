@@ -1,0 +1,68 @@
+{
+  "common": {
+    "greeting": "Hola {{name}}",
+    "greetingNoName": "Hola",
+    "footer": "Saludos,\nEl equipo de Evenero",
+    "unsubscribe": "Cancelar suscripción a estos correos",
+    "viewOnline": "Ver en el navegador"
+  },
+  "pinCode": {
+    "subject": "Tu código de acceso a Evenero",
+    "title": "Tu código de acceso",
+    "body": "Usa este código para iniciar sesión en Evenero:",
+    "code": "{{code}}",
+    "expiry": "Este código expira en 10 minutos.",
+    "ignore": "Si no solicitaste este código, puedes ignorar este correo."
+  },
+  "coHostInvite": {
+    "subject": "🎉 ¡Estás invitado a ser coanfitrión de {{eventName}}!",
+    "title": "¡Eres coanfitrión!",
+    "body": "{{inviterName}} te ha invitado a ayudar a gestionar su evento en Evenero.",
+    "whatIsEvenero": "Evenero es una plataforma para compartir fotos y videos que ayuda a recopilar recuerdos de bodas, fiestas y eventos especiales. Los invitados pueden subir sus fotos, y todos pueden disfrutar de una galería compartida con los mejores momentos.",
+    "description": "Como coanfitrión, puedes gestionar el evento, ver todas las subidas, moderar contenido y descargar la colección completa de fotos. ¡Tu ayuda es valiosa!",
+    "permissions": "Lo que puedes hacer como coanfitrión:",
+    "permissionsList": "• Ver y descargar todas las fotos y videos\n• Aprobar o eliminar subidas\n• Acceder a la configuración del evento\n• Ver la presentación en vivo",
+    "acceptButton": "Ver galería del evento",
+    "dashboardNote": "Después de iniciar sesión, encontrarás este evento en tu panel.",
+    "ignore": "Si no reconoces al remitente, puedes ignorar este correo."
+  },
+  "eventReminder": {
+    "subject": "📸 ¡Es hora de compartir tus fotos de {{eventName}}!",
+    "title": "¿Listo para compartir tus recuerdos?",
+    "body": "Configuraste un recordatorio para subir y ver fotos de \"{{eventName}}\". ¡La galería está activa y esperando tus fotos!",
+    "uploadPrompt": "Comparte tus fotos y videos del evento - ayuda a crear una colección completa de recuerdos que todos puedan disfrutar.",
+    "viewOthers": "¡Ve lo que otros ya han compartido en la galería y descubre momentos que podrías haberte perdido!",
+    "viewGallery": "Ver y subir fotos",
+    "galleryLink": "Enlace de la galería:",
+    "downloadHint": "Puedes descargar fotos una por una desde la galería."
+  },
+  "reminderConfirmation": {
+    "subject": "Recordatorio configurado para {{eventName}}",
+    "title": "¡Recordatorio confirmado!",
+    "body": "Te enviaremos un recordatorio con el enlace de la galería de \"{{eventName}}\".",
+    "scheduledFor": "Recibirás tu recordatorio el {{date}}.",
+    "galleryLink": "Mientras tanto, puedes ver la galería aquí:",
+    "viewGalleryButton": "Ver galería",
+    "changeReminder": "¿Cambiaste de opinión? Solo ignora el correo de recordatorio cuando llegue."
+  },
+  "zipReady": {
+    "subject": "Tu descarga de fotos está lista",
+    "title": "Tu descarga está lista",
+    "body": "Tu colección de fotos de \"{{eventName}}\" ha sido empaquetada y está lista para descargar.",
+    "downloadButton": "Descargar fotos",
+    "expiry": "Este enlace de descarga expira en 24 horas.",
+    "size": "Tamaño total: {{size}}"
+  },
+  "welcome": {
+    "subject": "¡Bienvenido a Evenero!",
+    "title": "Bienvenido a Evenero",
+    "body": "¡Gracias por unirte a Evenero! Estamos emocionados de ayudarte a recopilar y compartir recuerdos de tus eventos.",
+    "getStarted": "Comenzar",
+    "features": {
+      "title": "Lo que puedes hacer:",
+      "create": "Crear eventos para bodas, fiestas y más",
+      "collect": "Recopilar fotos de todos tus invitados",
+      "share": "Compartir hermosas galerías con todos"
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "toast": {
+    "success": {
+      "saved": "Cambios guardados",
+      "copied": "Copiado al portapapeles",
+      "uploaded": "Subida completa",
+      "deleted": "Eliminado exitosamente",
+      "sent": "Enviado exitosamente",
+      "created": "Creado exitosamente",
+      "updated": "Actualizado exitosamente"
+    },
+    "error": {
+      "generic": "Algo salió mal",
+      "saveFailed": "Error al guardar cambios",
+      "uploadFailed": "Error al subir",
+      "deleteFailed": "Error al eliminar",
+      "networkError": "Error de red",
+      "unauthorized": "No tienes permiso"
+    },
+    "info": {
+      "processing": "Procesando...",
+      "uploading": "Subiendo..."
+    }
+  },
+  "events": {
+    "created": "Evento creado",
+    "createdDesc": "Tu evento ha sido creado. Actívalo para empezar a recopilar fotos.",
+    "createdAndActivated": "¡Evento creado y activado!",
+    "createdAndActivatedDesc": "Tu evento está ahora en vivo y listo para recibir fotos.",
+    "createdActivationFailed": "Evento creado",
+    "createdActivationFailedDesc": "Evento creado pero la activación falló. Puedes activarlo después.",
+    "updated": "Evento actualizado",
+    "deleted": "Evento eliminado",
+    "activated": "¡Evento activado! Tu galería está ahora en vivo.",
+    "coHostAdded": "Invitación de coanfitrión enviada",
+    "coHostRemoved": "Coanfitrión eliminado",
+    "pinUpdated": "PIN actualizado",
+    "coverUpdated": "Foto de portada actualizada"
+  },
+  "upload": {
+    "started": "Iniciando subida...",
+    "progress": "Subiendo {{current}} de {{total}}...",
+    "complete": "{{count}} archivos subidos exitosamente",
+    "failed": "{{count}} archivos fallaron al subir",
+    "partialSuccess": "{{success}} subidos, {{failed}} fallaron"
+  },
+  "download": {
+    "started": "Preparando descarga...",
+    "zipCreating": "Creando archivo zip. Te enviaremos un correo cuando esté listo.",
+    "zipCreatingTitle": "¡Correo en camino!",
+    "zipCreatingDesc": "Estamos creando un zip con {{count}} fotos. Recibirás un correo con el enlace de descarga en {{time}}.",
+    "complete": "Descarga iniciada",
+    "failed": "Error en la descarga"
+  },
+  "gallery": {
+    "imagesArchived": "Imágenes archivadas",
+    "imagesArchivedDesc": "{{count}} imágenes han sido archivadas exitosamente",
+    "archiveFailed": "Error al archivar imágenes",
+    "archiveFailedDesc": "Por favor inténtalo de nuevo"
+  },
+  "auth": {
+    "loggedIn": "Sesión iniciada exitosamente",
+    "loggedOut": "Sesión cerrada",
+    "codeSent": "Código de verificación enviado a {{email}}",
+    "codeInvalid": "Código inválido. Por favor inténtalo de nuevo.",
+    "codeExpired": "El código expiró. Por favor solicita uno nuevo.",
+    "pinSent": "Código PIN enviado",
+    "pinSentDesc": "Revisa tu correo para el código PIN de 6 dígitos.",
+    "welcome": "¡Bienvenido!",
+    "welcomeDesc": "Has iniciado sesión exitosamente.",
+    "invalidPin": "PIN inválido",
+    "invalidPinDesc": "El código PIN que ingresaste es incorrecto.",
+    "sendPinFailed": "Error al enviar el código PIN. Por favor inténtalo de nuevo.",
+    "unexpectedError": "Ocurrió un error inesperado. Por favor inténtalo de nuevo."
+  }
+}

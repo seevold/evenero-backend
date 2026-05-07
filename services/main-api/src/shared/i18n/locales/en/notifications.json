@@ -1,0 +1,76 @@
+{
+  "toast": {
+    "success": {
+      "saved": "Changes saved",
+      "copied": "Copied to clipboard",
+      "uploaded": "Upload complete",
+      "deleted": "Deleted successfully",
+      "sent": "Sent successfully",
+      "created": "Created successfully",
+      "updated": "Updated successfully"
+    },
+    "error": {
+      "generic": "Something went wrong",
+      "saveFailed": "Failed to save changes",
+      "uploadFailed": "Upload failed",
+      "deleteFailed": "Failed to delete",
+      "networkError": "Network error",
+      "unauthorized": "You don't have permission"
+    },
+    "info": {
+      "processing": "Processing...",
+      "uploading": "Uploading..."
+    }
+  },
+  "events": {
+    "created": "Event created",
+    "createdDesc": "Your event has been created. Activate it to start collecting photos.",
+    "createdAndActivated": "Event Created and Activated!",
+    "createdAndActivatedDesc": "Your event is now live and ready to receive photos.",
+    "createdActivationFailed": "Event Created",
+    "createdActivationFailedDesc": "Event created but activation failed. You can activate it later.",
+    "updated": "Event updated",
+    "deleted": "Event deleted",
+    "activated": "Event activated! Your gallery is now live.",
+    "coHostAdded": "Co-host invitation sent",
+    "coHostRemoved": "Co-host removed",
+    "pinUpdated": "PIN updated",
+    "coverUpdated": "Cover photo updated"
+  },
+  "upload": {
+    "started": "Starting upload...",
+    "progress": "Uploading {{current}} of {{total}}...",
+    "complete": "{{count}} files uploaded successfully",
+    "failed": "{{count}} files failed to upload",
+    "partialSuccess": "{{success}} uploaded, {{failed}} failed"
+  },
+  "download": {
+    "started": "Preparing download...",
+    "zipCreating": "Creating zip file. We'll email you when it's ready.",
+    "zipCreatingTitle": "Email on the way!",
+    "zipCreatingDesc": "We're creating a zip with {{count}} photos. You'll receive an email with the download link in {{time}}.",
+    "complete": "Download started",
+    "failed": "Download failed"
+  },
+  "gallery": {
+    "imagesArchived": "Images archived",
+    "imagesArchivedDesc": "{{count}} images have been archived successfully",
+    "archiveFailed": "Failed to archive images",
+    "archiveFailedDesc": "Please try again"
+  },
+  "auth": {
+    "loggedIn": "Logged in successfully",
+    "loggedOut": "Logged out",
+    "codeSent": "Verification code sent to {{email}}",
+    "codeInvalid": "Invalid code. Please try again.",
+    "codeExpired": "Code expired. Please request a new one.",
+    "pinSent": "PIN Code Sent",
+    "pinSentDesc": "Check your email for the 6-digit PIN code.",
+    "welcome": "Welcome!",
+    "welcomeDesc": "You've been successfully signed in.",
+    "invalidPin": "Invalid PIN",
+    "invalidPinDesc": "The PIN code you entered is incorrect.",
+    "sendPinFailed": "Failed to send PIN code. Please try again.",
+    "unexpectedError": "An unexpected error occurred. Please try again."
+  }
+}

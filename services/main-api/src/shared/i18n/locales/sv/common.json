@@ -1,0 +1,192 @@
+{
+  "app": {
+    "name": "Evenero",
+    "tagline": "Samla och dela evenemangsminnen"
+  },
+  "nav": {
+    "dashboard": "Översikt",
+    "gallery": "Galleri",
+    "upload": "Ladda upp",
+    "profile": "Profil",
+    "settings": "Inställningar",
+    "logout": "Logga ut",
+    "login": "Logga in",
+    "admin": "Admin"
+  },
+  "auth": {
+    "login": "Logga in",
+    "logout": "Logga ut",
+    "email": "E-post",
+    "emailPlaceholder": "Ange din e-post",
+    "sendCode": "Skicka kod",
+    "enterCode": "Ange kod",
+    "codeSent": "Vi skickade en kod till {{email}}",
+    "verifyCode": "Verifiera kod",
+    "rememberDevice": "Kom ihåg denna enhet",
+    "rememberDeviceHint": "Förbli inloggad i 30 dagar",
+    "wrongCode": "Ogiltig kod. Försök igen.",
+    "codeExpired": "Koden har gått ut. Begär en ny.",
+    "resendCode": "Skicka kod igen",
+    "backToEmail": "Tillbaka till e-post"
+  },
+  "actions": {
+    "save": "Spara",
+    "cancel": "Avbryt",
+    "archive": "Arkivera",
+    "archiving": "Arkiverar...",
+    "delete": "Radera",
+    "deleting": "Raderar...",
+    "edit": "Redigera",
+    "create": "Skapa",
+    "creating": "Skapar...",
+    "activating": "Aktiverar...",
+    "update": "Uppdatera",
+    "confirm": "Bekräfta",
+    "back": "Tillbaka",
+    "next": "Nästa",
+    "done": "Klar",
+    "close": "Stäng",
+    "copy": "Kopiera",
+    "copied": "Kopierat!",
+    "share": "Dela",
+    "download": "Ladda ner",
+    "upload": "Ladda upp",
+    "retry": "Försök igen",
+    "loading": "Laddar...",
+    "viewAll": "Visa alla",
+    "learnMore": "Läs mer",
+    "select": "Välj",
+    "exit": "Avsluta"
+  },
+  "forms": {
+    "optional": "(valfritt)"
+  },
+  "optional": "valfritt",
+  "error": "Fel",
+  "dialogs": {
+    "confirmDelete": "Arkivera {{count}} objekt?",
+    "deleteWarning": "Valda objekt flyttas till arkivet. Arkiverade objekt raderas permanent över tid. Du kan också radera dem omedelbart i arkivet om du vill."
+  },
+  "common": {
+    "items": "objekt",
+    "note": "Notera",
+    "tip": "Tips",
+    "sizes": "Storlekar",
+    "saved": "Sparat"
+  },
+  "status": {
+    "active": "Aktiv",
+    "inactive": "Inaktiv",
+    "pending": "Väntande",
+    "expired": "Utgången",
+    "open": "Öppen",
+    "closed": "Stängd",
+    "premium": "Premium",
+    "uploadEnded": "Uppladdningsperiod avslutad",
+    "uploadsDisabled": "Uppladdning inaktiverad",
+    "storageEnded": "Lagringsperiod avslutad",
+    "today": "Idag",
+    "daysLeft": "{{count}} dag kvar",
+    "daysLeft_other": "{{count}} dagar kvar",
+    "monthsLeft": "{{count}} månad kvar",
+    "monthsLeft_other": "{{count}} månader kvar",
+    "yearsLeft": "{{count}} år kvar",
+    "yearsLeft_other": "{{count}} år kvar",
+    "yearsMonthsLeft": "{{years}}+ år kvar"
+  },
+  "time": {
+    "today": "Idag",
+    "yesterday": "Igår",
+    "daysAgo": "{{count}} dagar sedan",
+    "weeksAgo": "{{count}} veckor sedan",
+    "monthsAgo": "{{count}} månader sedan",
+    "yearsAgo": "{{count}} år sedan",
+    "remaining": "{{time}} återstår",
+    "expired": "Utgången"
+  },
+  "errors": {
+    "generic": "Något gick fel. Försök igen.",
+    "notFound": "Hittades inte",
+    "unauthorized": "Du har inte åtkomst till denna resurs",
+    "networkError": "Nätverksfel. Kontrollera din anslutning.",
+    "serverError": "Serverfel. Försök igen senare."
+  },
+  "validation": {
+    "required": "Detta fält är obligatoriskt",
+    "invalidEmail": "Ange en giltig e-postadress",
+    "tooShort": "Måste vara minst {{min}} tecken",
+    "tooLong": "Får vara max {{max}} tecken"
+  },
+  "language": {
+    "title": "Språk",
+    "select": "Välj språk",
+    "english": "English",
+    "norwegian": "Norsk",
+    "swedish": "Svenska",
+    "spanish": "Español"
+  },
+  "header": {
+    "myAccount": "Mitt konto",
+    "events": "Evenemang",
+    "buyEvent": "Köp evenemang",
+    "loggedOut": "Utloggad",
+    "loggedOutDescription": "Du har loggats ut."
+  },
+  "profile": {
+    "edit": "Redigera profil",
+    "editDescription": "Uppdatera din profilinformation och inställningar.",
+    "name": "Namn",
+    "namePlaceholder": "Ange ditt namn",
+    "email": "E-post",
+    "credits": "Krediter",
+    "creditsRemaining": "evenemangskrediter kvar",
+    "buyMoreCredits": "Köp fler krediter",
+    "saveChanges": "Spara ändringar"
+  },
+  "browser": {
+    "openedIn": "Öppnad i {{browserName}}",
+    "openedInApp": "Öppnad i en app-webbläsare",
+    "bestExperience": "För bästa upplevelse och för att kunna ladda upp foton, rekommenderar vi att öppna denna sida i din vanliga webbläsare (Safari, Chrome, etc.).",
+    "copyLink": "Kopiera länk",
+    "howTo": "Så här gör du:",
+    "step1": "Tryck \"Kopiera länk\" eller hitta \"Öppna i webbläsare\" i appens meny",
+    "step2": "Klistra in länken i Safari, Chrome eller din vanliga webbläsare",
+    "urlCopied": "URL kopierad",
+    "linkCopiedDescription": "Länken har kopierats till urklipp. Klistra in den i din webbläsare.",
+    "copyFailed": "Kunde inte kopiera",
+    "copyFailedDescription": "Kopiera URL:en manuellt från adressfältet."
+  },
+  "qr": {
+    "title": "QR-kodgenerator",
+    "style": "Stil",
+    "themes": {
+      "classic": "Klassisk",
+      "modern": "Modern",
+      "elegant": "Elegant",
+      "dots": "Prickar",
+      "classy": "Stilren",
+      "soft": "Mjuk"
+    },
+    "customColors": "Anpassade färger",
+    "qrCodeColor": "QR-kod",
+    "backgroundColor": "Bakgrund",
+    "transparentBackground": "Transparent bakgrund",
+    "visibilityWarning": "Testa din QR-kod på den slutliga bakgrunden innan utskrift för att säkerställa god kontrast och läsbarhet.",
+    "customColorsWarning": "Testa din QR-kod på den slutliga bakgrunden innan utskrift för att säkerställa god kontrast och läsbarhet.",
+    "centerDecoration": "Mittdekoration",
+    "centerNone": "Ingen",
+    "centerLogo": "Logotyp",
+    "centerInitials": "Initialer",
+    "uploadLogo": "Ladda upp logotyp",
+    "changeLogo": "Byt logotyp",
+    "logoUploaded": "Logotyp uppladdad",
+    "logoHint": "Kvadratisk PNG eller SVG rekommenderas",
+    "initialsPlaceholder": "L&S",
+    "initialsHint": "Max 5 tecken, t.ex. parets initialer",
+    "downloadPng": "Ladda ner PNG",
+    "downloadSvg": "Ladda ner SVG",
+    "reset": "Återställ",
+    "url": "URL:",
+    "format": "Format:"
+  }
+}

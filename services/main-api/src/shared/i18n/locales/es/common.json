@@ -1,0 +1,192 @@
+{
+  "app": {
+    "name": "Evenero",
+    "tagline": "Recopila y comparte recuerdos de eventos"
+  },
+  "nav": {
+    "dashboard": "Panel",
+    "gallery": "Galería",
+    "upload": "Subir",
+    "profile": "Perfil",
+    "settings": "Configuración",
+    "logout": "Cerrar sesión",
+    "login": "Iniciar sesión",
+    "admin": "Admin"
+  },
+  "auth": {
+    "login": "Iniciar sesión",
+    "logout": "Cerrar sesión",
+    "email": "Correo electrónico",
+    "emailPlaceholder": "Ingresa tu correo",
+    "sendCode": "Enviar código",
+    "enterCode": "Ingresa el código",
+    "codeSent": "Enviamos un código a {{email}}",
+    "verifyCode": "Verificar código",
+    "rememberDevice": "Recordar este dispositivo",
+    "rememberDeviceHint": "Mantener sesión por 30 días",
+    "wrongCode": "Código inválido. Inténtalo de nuevo.",
+    "codeExpired": "El código expiró. Por favor solicita uno nuevo.",
+    "resendCode": "Reenviar código",
+    "backToEmail": "Volver al correo"
+  },
+  "actions": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "archive": "Archivar",
+    "archiving": "Archivando...",
+    "delete": "Eliminar",
+    "deleting": "Eliminando...",
+    "edit": "Editar",
+    "create": "Crear",
+    "creating": "Creando...",
+    "activating": "Activando...",
+    "update": "Actualizar",
+    "confirm": "Confirmar",
+    "back": "Atrás",
+    "next": "Siguiente",
+    "done": "Listo",
+    "close": "Cerrar",
+    "copy": "Copiar",
+    "copied": "¡Copiado!",
+    "share": "Compartir",
+    "download": "Descargar",
+    "upload": "Subir",
+    "retry": "Reintentar",
+    "loading": "Cargando...",
+    "viewAll": "Ver todo",
+    "learnMore": "Más información",
+    "select": "Seleccionar",
+    "exit": "Salir"
+  },
+  "forms": {
+    "optional": "(opcional)"
+  },
+  "optional": "opcional",
+  "error": "Error",
+  "dialogs": {
+    "confirmDelete": "¿Archivar {{count}} elemento(s)?",
+    "deleteWarning": "Los elementos seleccionados se moverán al archivo. Los elementos archivados se eliminan permanentemente con el tiempo. También puedes eliminarlos inmediatamente en el archivo si lo prefieres."
+  },
+  "common": {
+    "items": "elementos",
+    "note": "Nota",
+    "tip": "Consejo",
+    "sizes": "Tamaños",
+    "saved": "Guardado"
+  },
+  "status": {
+    "active": "Activo",
+    "inactive": "Inactivo",
+    "pending": "Pendiente",
+    "expired": "Expirado",
+    "open": "Abierto",
+    "closed": "Cerrado",
+    "premium": "Premium",
+    "uploadEnded": "Período de subida terminado",
+    "uploadsDisabled": "Subidas deshabilitadas",
+    "storageEnded": "Período de almacenamiento terminado",
+    "today": "Hoy",
+    "daysLeft": "Queda {{count}} día",
+    "daysLeft_other": "Quedan {{count}} días",
+    "monthsLeft": "Queda {{count}} mes",
+    "monthsLeft_other": "Quedan {{count}} meses",
+    "yearsLeft": "Queda {{count}} año",
+    "yearsLeft_other": "Quedan {{count}} años",
+    "yearsMonthsLeft": "Quedan {{years}}+ años"
+  },
+  "time": {
+    "today": "Hoy",
+    "yesterday": "Ayer",
+    "daysAgo": "Hace {{count}} días",
+    "weeksAgo": "Hace {{count}} semanas",
+    "monthsAgo": "Hace {{count}} meses",
+    "yearsAgo": "Hace {{count}} años",
+    "remaining": "{{time}} restante",
+    "expired": "Expirado"
+  },
+  "errors": {
+    "generic": "Algo salió mal. Por favor inténtalo de nuevo.",
+    "notFound": "No encontrado",
+    "unauthorized": "No tienes acceso a este recurso",
+    "networkError": "Error de red. Por favor verifica tu conexión.",
+    "serverError": "Error del servidor. Por favor inténtalo más tarde."
+  },
+  "validation": {
+    "required": "Este campo es obligatorio",
+    "invalidEmail": "Por favor ingresa un correo válido",
+    "tooShort": "Debe tener al menos {{min}} caracteres",
+    "tooLong": "Debe tener máximo {{max}} caracteres"
+  },
+  "language": {
+    "title": "Idioma",
+    "select": "Seleccionar idioma",
+    "english": "English",
+    "norwegian": "Norsk",
+    "swedish": "Svenska",
+    "spanish": "Español"
+  },
+  "header": {
+    "myAccount": "Mi cuenta",
+    "events": "Eventos",
+    "buyEvent": "Comprar evento",
+    "loggedOut": "Sesión cerrada",
+    "loggedOutDescription": "Has cerrado sesión exitosamente."
+  },
+  "profile": {
+    "edit": "Editar perfil",
+    "editDescription": "Actualiza tu información y preferencias.",
+    "name": "Nombre",
+    "namePlaceholder": "Ingresa tu nombre",
+    "email": "Correo electrónico",
+    "credits": "Créditos",
+    "creditsRemaining": "créditos de eventos restantes",
+    "buyMoreCredits": "Comprar más créditos",
+    "saveChanges": "Guardar cambios"
+  },
+  "browser": {
+    "openedIn": "Abierto en {{browserName}}",
+    "openedInApp": "Abierto en un navegador de app",
+    "bestExperience": "Para la mejor experiencia y poder subir fotos, recomendamos abrir esta página en tu navegador habitual (Safari, Chrome, etc.).",
+    "copyLink": "Copiar enlace",
+    "howTo": "Cómo hacerlo:",
+    "step1": "Presiona \"Copiar enlace\" o busca \"Abrir en navegador\" en el menú de la app",
+    "step2": "Pega el enlace en Safari, Chrome u otro navegador",
+    "urlCopied": "URL copiada",
+    "linkCopiedDescription": "El enlace ha sido copiado al portapapeles. Pégalo en tu navegador.",
+    "copyFailed": "No se pudo copiar",
+    "copyFailedDescription": "Por favor copia la URL manualmente desde la barra de direcciones."
+  },
+  "qr": {
+    "title": "Generador de código QR",
+    "style": "Estilo",
+    "themes": {
+      "classic": "Clásico",
+      "modern": "Moderno",
+      "elegant": "Elegante",
+      "dots": "Puntos",
+      "classy": "Sofisticado",
+      "soft": "Suave"
+    },
+    "customColors": "Colores personalizados",
+    "qrCodeColor": "Código QR",
+    "backgroundColor": "Fondo",
+    "transparentBackground": "Fondo transparente",
+    "visibilityWarning": "Prueba tu código QR en el fondo final antes de imprimir para asegurar buen contraste y legibilidad.",
+    "customColorsWarning": "Prueba tu código QR en el fondo final antes de imprimir para asegurar buen contraste y legibilidad.",
+    "centerDecoration": "Decoración central",
+    "centerNone": "Ninguna",
+    "centerLogo": "Logo",
+    "centerInitials": "Iniciales",
+    "uploadLogo": "Subir logo",
+    "changeLogo": "Cambiar logo",
+    "logoUploaded": "Logo subido",
+    "logoHint": "Se recomienda PNG o SVG cuadrado",
+    "initialsPlaceholder": "L&S",
+    "initialsHint": "Máx 5 caracteres, ej. iniciales de pareja",
+    "downloadPng": "Descargar PNG",
+    "downloadSvg": "Descargar SVG",
+    "reset": "Restablecer",
+    "url": "URL:",
+    "format": "Formato:"
+  }
+}
