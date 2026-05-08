@@ -1,0 +1,48 @@
+# Cloud Build pipeline for main-api Cloud Run-deploy.
+#
+# Trigger: push til main-branch, only når services/main-api/** endres.
+# Build context: services/main-api/
+# Steps: bygg image → push til Artifact Registry → deploy til Cloud Run.
+
+steps:
+  # 1. Bygg Docker-image med vår multi-stage Dockerfile
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/main-api-staging:${SHORT_SHA}
+      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/main-api-staging:latest
+      - .
+
+  # 2. Push begge tags til Artifact Registry
+  - id: push-sha
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/main-api-staging:${SHORT_SHA}
+
+  - id: push-latest
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/main-api-staging:latest
+
+  # 3. Deploy til Cloud Run (env-vars og secrets settes ved første manuelle deploy
+  #    og persisteres på service'en — vi oppdaterer kun image-tag her)
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - main-api-staging
+      - --image=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/main-api-staging:${SHORT_SHA}
+      - --region=europe-north1
+      - --project=${PROJECT_ID}
+      - --quiet
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+# Builds in europe-north1 for Cloud Run-region nærhet
+# Region settes via trigger-config (--region=europe-north1)
