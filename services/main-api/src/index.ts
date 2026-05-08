@@ -80,7 +80,7 @@ app.use((req, res, next) => {
 
   const port = parseInt(process.env.PORT || "8080", 10);
   server.listen({ port, host: "0.0.0.0" }, () => {
-    log(`main-api-staging listening on port ${port}`);
+    log(`main-api listening on port ${port}`);
   });
 
   // Reminder scheduler — kjører kun hvis env-var er satt eksplisitt.
