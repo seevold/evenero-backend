@@ -293,7 +293,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { couponCode, buyerCountry } = req.body;
 
       const stripeData = await getStripePriceData();
-      const country = (buyerCountry || 'NO').toUpperCase();
+
+      // Country-prioritet: 1) request body (override fra frontend),
+      // 2) Vercel header (forwarded fra Vercel proxy), 3) NO som fallback.
+      // Frontend trenger ikke sende buyerCountry — backend detekterer fra Vercel.
+      const headerCountry = (req.headers["x-vercel-ip-country"] as string | undefined)?.toUpperCase();
+      const country = (buyerCountry || headerCountry || "NO").toUpperCase();
       const currency = getCurrencyForCountry(country, stripeData.currencyOptions);
       const basePrice = stripeData.currencyOptions[currency] ?? stripeData.defaultAmount;
       const symbol = getSymbol(currency);

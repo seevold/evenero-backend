@@ -1,0 +1,12 @@
+# Dette overstyrer .gitignore for gcloud builds submit upload
+# Vi VIL ha med package-lock.json — Dockerfile bruker npm ci
+
+node_modules/
+dist/
+.git/
+.env
+.env.local
+.env.*.local
+*.log
+README.md
+.DS_Store
