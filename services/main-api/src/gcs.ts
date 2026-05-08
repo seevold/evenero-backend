@@ -132,21 +132,91 @@ export async function listFiles(prefix?: string): Promise<string[]> {
   }
 }
 
-// Delete a file from Google Cloud Storage
+// Delete a file from Google Cloud Storage. Idempotent — 404 (allerede slettet)
+// teller som suksess for å unngå å fail'e cascade-slett ved partielle tilstander.
 export async function deleteFile(filename: string): Promise<boolean> {
   if (!storage) {
-    console.error('Google Cloud Storage not initialized');
+    console.error("[GCS] Not initialized");
     return false;
   }
 
   try {
     const bucket = storage.bucket(GCS_BUCKET_NAME);
     await bucket.file(filename).delete();
+    console.log(`[GCS] Deleted: ${filename}`);
     return true;
-  } catch (error) {
-    console.error('Error deleting file:', error);
+  } catch (error: any) {
+    if (error?.code === 404) {
+      // Allerede slettet eller eksisterte aldri — idempotent suksess
+      console.log(`[GCS] Already gone (404): ${filename}`);
+      return true;
+    }
+    console.error(`[GCS] Failed to delete ${filename}:`, error?.message || error);
     return false;
   }
+}
+
+// Extract GCS-path fra full URL eller gs://-URI.
+// Eksempel-input:
+//   https://storage.googleapis.com/evenero-cloud/images/abc.jpg?token=xyz
+//   gs://evenero-staging-cloud/images/abc.jpg
+// Returnerer: "images/abc.jpg" (path uten bucket eller query-params)
+// Returnerer null hvis URL ikke matcher GCS-format.
+//
+// Logger advarsel hvis URL'en peker til en annen bucket enn GCS_BUCKET_NAME
+// (kan skje ved migrering — sletting vil da treffe feil bucket og må fikses manuelt).
+export function extractGcsPath(url: string | null | undefined): string | null {
+  if (!url || typeof url !== "string") return null;
+
+  // https://storage.googleapis.com/<bucket>/<path>
+  const httpsMatch = url.match(/^https?:\/\/storage\.googleapis\.com\/([^/]+)\/(.+?)(?:\?|$)/);
+  if (httpsMatch) {
+    const [, bucket, path] = httpsMatch;
+    if (bucket !== GCS_BUCKET_NAME) {
+      console.warn(
+        `[GCS] URL refererer bucket '${bucket}' men GCS_BUCKET_NAME='${GCS_BUCKET_NAME}' — sletting vil treffe feil bucket. Skipping.`,
+      );
+      return null;
+    }
+    return decodeURIComponent(path);
+  }
+
+  // gs://<bucket>/<path>
+  const gsMatch = url.match(/^gs:\/\/([^/]+)\/(.+)$/);
+  if (gsMatch) {
+    const [, bucket, path] = gsMatch;
+    if (bucket !== GCS_BUCKET_NAME) {
+      console.warn(`[GCS] gs:// refererer '${bucket}' ulik GCS_BUCKET_NAME='${GCS_BUCKET_NAME}'. Skipping.`);
+      return null;
+    }
+    return path;
+  }
+
+  return null;
+}
+
+// Generér derivative-path basert på fil-extension.
+// Bilder: <name>.<ext> → <name>_small.<ext>
+// Videoer: <name>.<ext> → <name>_compressed.<ext>
+const VIDEO_EXTS = ["mp4", "mov", "avi", "wmv", "webm", "mkv"];
+export function getDerivativePath(originalPath: string): string {
+  const lastDot = originalPath.lastIndexOf(".");
+  const ext = lastDot > 0 ? originalPath.slice(lastDot + 1).toLowerCase() : "";
+  const isVideo = VIDEO_EXTS.includes(ext);
+  const suffix = isVideo ? "_compressed" : "_small";
+  if (lastDot < 0) return originalPath + suffix;
+  return originalPath.slice(0, lastDot) + suffix + originalPath.slice(lastDot);
+}
+
+// Slett fil basert på URL — slår sammen extractGcsPath + deleteFile.
+// Idempotent. Returnerer true hvis slettet eller allerede borte; false ved ekte feil.
+export async function deleteFileByUrl(url: string | null | undefined): Promise<boolean> {
+  const path = extractGcsPath(url);
+  if (!path) {
+    if (url) console.warn(`[GCS] Kunne ikke parse URL for sletting: ${url.substring(0, 100)}`);
+    return false;
+  }
+  return deleteFile(path);
 }
 
 // Extract filename from GCS URL
