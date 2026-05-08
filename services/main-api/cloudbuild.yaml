@@ -1,24 +1,7 @@
 # Cloud Build pipeline for main-api Cloud Run-deploy.
-#
-# Trigger: push til main-branch, only når services/main-api/** endres.
-# Source er repo-rot (services/main-api/cloudbuild.yaml), så vi må bruke
-# `dir: services/main-api` for å peke på riktig working directory.
+# Source er repo-rot, så vi må bruke `dir: services/main-api` for build.
 
 steps:
-  - id: debug-ls
-    name: alpine
-    entrypoint: sh
-    args:
-      - -c
-      - |
-        echo "=== /workspace ==="
-        ls -la /workspace
-        echo "=== /workspace/services/main-api ==="
-        ls -la /workspace/services/main-api
-        echo "=== package-lock.json present? ==="
-        ls -la /workspace/services/main-api/package-lock.json || echo "MISSING"
-        wc -l /workspace/services/main-api/package-lock.json || true
-
   - id: build
     name: gcr.io/cloud-builders/docker
     dir: services/main-api
