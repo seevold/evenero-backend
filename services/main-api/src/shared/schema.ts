@@ -61,12 +61,15 @@ export const events = pgTable("events", {
   // Curated gallery - when enabled, public visitors only see liked images
   curated_public_enabled: boolean("curated_public_enabled").default(false),
   // QR Code Generator settings - stored as JSON
-  // Run this SQL manually in Google Cloud SQL:
-  // ALTER TABLE events ADD COLUMN IF NOT EXISTS qr_settings TEXT;
-  qr_settings: text("qr_settings")
+  qr_settings: text("qr_settings"),
+  // Soft-delete: settes når bruker sletter event. NULL = aktivt.
+  // Bevarer all relatert data (event_images, likes etc.) for stats + retention.
+  // Hard-delete skjer via separat admin-prosess med 30+ dagers karantene.
+  deleted_at: timestamp("deleted_at")
 }, (table) => ({
   eventIdIdx: index("idx_event_id").on(table.event_id),
-  eventOwnerIdx: index("idx_event_owner").on(table.event_owner)
+  eventOwnerIdx: index("idx_event_owner").on(table.event_owner),
+  deletedAtIdx: index("idx_events_deleted_at").on(table.deleted_at)
 }));
 
 // Moderation status enum values
@@ -93,10 +96,14 @@ export const event_images = pgTable("event_images", {
   moderated_at: timestamp("moderated_at"),
   moderated_by: varchar("moderated_by", { length: 255 }),
   // Like tracking - denormalized count for fast queries
-  like_count: integer("like_count").default(0)
+  like_count: integer("like_count").default(0),
+  // Settes når GCS-fil er fjernet i en separat admin-prosess.
+  // NULL = filen finnes fortsatt i bucket. Raden bevart for historisk stats.
+  files_purged_at: timestamp("files_purged_at")
 }, (table) => ({
   eventIdIdx: index("idx_event_images_event_id").on(table.event_id),
-  moderationIdx: index("idx_event_images_moderation").on(table.moderation_status)
+  moderationIdx: index("idx_event_images_moderation").on(table.moderation_status),
+  filesPurgedIdx: index("idx_event_images_files_purged_at").on(table.files_purged_at)
 }));
 
 // Event image likes table - tracks who liked which images

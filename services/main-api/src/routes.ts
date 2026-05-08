@@ -798,24 +798,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Hvis event_photo endres, slett gammelt cover-bilde fra GCS
-      // (idempotent — fail'er ikke event-update hvis gammel fil allerede er borte)
-      if (
-        req.body.event_photo !== undefined &&
-        existingEvent.event_photo &&
-        req.body.event_photo !== existingEvent.event_photo
-      ) {
-        try {
-          const { deleteFileByUrl, extractGcsPath, deleteFile, getDerivativePath } = await import("./gcs");
-          console.log(`[EVENT ${event_id}] Cover-photo endret, sletter gammel: ${existingEvent.event_photo.substring(0, 80)}…`);
-          await deleteFileByUrl(existingEvent.event_photo);
-          // Slett også derivative (thumbnail) hvis eksisterer
-          const oldPath = extractGcsPath(existingEvent.event_photo);
-          if (oldPath) await deleteFile(getDerivativePath(oldPath));
-        } catch (cleanupErr) {
-          console.warn(`[EVENT ${event_id}] Kunne ikke slette gammelt cover (fortsetter med update):`, cleanupErr);
-        }
-      }
+      // NB: Vi sletter IKKE gammelt cover-photo fra GCS når det erstattes.
+      // Gamle covers blir orphan-filer i bucket — trygt og ikke-blokkerende.
+      // Cleanup av orphans gjøres i separat admin-prosess med karantene
+      // (se EVENERO-CLEANUP-PLAN.md). Dette beskytter aktiv kunde-data.
 
       // Update event
       const event = await storage.updateEvent(event_id, req.body);

@@ -249,27 +249,32 @@ export class PostgreSQLStorage implements IStorage {
   }
 
   // Event methods
+  // NB: Soft-deletede events (deleted_at IS NOT NULL) filtreres bort fra alle
+  // brukerorienterte queries. Kun admin-tooling skal kunne se dem.
   async getEvent(eventId: string): Promise<Event | undefined> {
     const [event] = await db.select().from(events)
-      .where(eq(events.event_id, eventId));
+      .where(and(eq(events.event_id, eventId), isNull(events.deleted_at)));
     return event;
   }
 
   async getEventById(id: string): Promise<Event | undefined> {
     const [event] = await db.select().from(events)
-      .where(eq(events.id, id));
+      .where(and(eq(events.id, id), isNull(events.deleted_at)));
     return event;
   }
 
   async getEventsByOwner(ownerEmail: string): Promise<Event[]> {
     const lowerEmail = ownerEmail.toLowerCase();
     return await db.select().from(events)
-      .where(or(
-        sql`lower(${events.event_owner}) = ${lowerEmail}`,
-        sql`lower(${events.event_co_host}) = ${lowerEmail}`,
-        sql`lower(${events.event_co_host}) LIKE ${lowerEmail + ',%'}`,
-        sql`lower(${events.event_co_host}) LIKE ${'%,' + lowerEmail + ',%'}`,
-        sql`lower(${events.event_co_host}) LIKE ${'%,' + lowerEmail}`
+      .where(and(
+        isNull(events.deleted_at),
+        or(
+          sql`lower(${events.event_owner}) = ${lowerEmail}`,
+          sql`lower(${events.event_co_host}) = ${lowerEmail}`,
+          sql`lower(${events.event_co_host}) LIKE ${lowerEmail + ',%'}`,
+          sql`lower(${events.event_co_host}) LIKE ${'%,' + lowerEmail + ',%'}`,
+          sql`lower(${events.event_co_host}) LIKE ${'%,' + lowerEmail}`
+        )
       ))
       .orderBy(events.event_date);
   }
@@ -294,84 +299,48 @@ export class PostgreSQLStorage implements IStorage {
   }
 
   async deleteEvent(id: string): Promise<boolean> {
-    // Kaskade-rydding: ingen FK CASCADE i skjemaet i dag, så vi gjør det manuelt.
-    // Rekkefølge: GCS-filer → barn-tabeller → event-rad.
-    // Hvert steg er idempotent — partiell feil avbryter ikke prosessen.
+    // SOFT-DELETE: setter events.deleted_at = NOW(). Ingen rader eller GCS-filer
+    // slettes. All relatert data bevares for retention-perioden.
+    //
+    // Sluttbruker oppfatter eventet som slettet (vil filtreres bort av listing-
+    // queries med WHERE deleted_at IS NULL).
+    //
+    // Hard-delete (faktisk fjerning av rader og GCS-filer) gjøres av en separat
+    // admin-prosess etter 30+ dagers karantene-periode. Den prosessen er IKKE
+    // implementert ennå — bilder forblir i bucket inntil videre.
+    //
     // INPUT: events.id (uuid PK), ikke events.event_id (varchar).
 
     const [event] = await db.select().from(events).where(eq(events.id, id));
     if (!event) {
-      console.warn(`[DELETE EVENT] uuid=${id} ikke funnet`);
+      console.warn(`[SOFT-DELETE EVENT] uuid=${id} ikke funnet`);
       return false;
     }
 
-    const eventIdVarchar = event.event_id;
-    console.log(`[DELETE EVENT ${eventIdVarchar}] uuid=${id} — starter cascade-cleanup`);
-
-    // 1. Hent alle event_images (inkl. arkiverte) for å kunne slette GCS-filer
-    const allImages = await db.select().from(event_images)
-      .where(eq(event_images.event_id, eventIdVarchar));
-    console.log(`[DELETE EVENT ${eventIdVarchar}] ${allImages.length} media-rader å rydde`);
-
-    // 2. Slett GCS-filer (best effort — logger feil, fortsetter)
-    const gcs = await import("./gcs");
-
-    if (event.event_photo) {
-      try {
-        await gcs.deleteFileByUrl(event.event_photo);
-        const coverPath = gcs.extractGcsPath(event.event_photo);
-        if (coverPath) await gcs.deleteFile(gcs.getDerivativePath(coverPath));
-      } catch (e) {
-        console.warn(`[DELETE EVENT ${eventIdVarchar}] cover-cleanup feilet (fortsetter):`, e);
-      }
+    if (event.deleted_at) {
+      console.log(`[SOFT-DELETE EVENT ${event.event_id}] allerede markert slettet ${event.deleted_at}`);
+      return true; // idempotent
     }
 
-    let gcsDeleted = 0;
-    let gcsFailed = 0;
-    for (const img of allImages) {
-      try {
-        const path = gcs.extractGcsPath(img.image_url);
-        if (path) {
-          const ok = await gcs.deleteFile(path);
-          if (ok) gcsDeleted++; else gcsFailed++;
-          await gcs.deleteFile(gcs.getDerivativePath(path));
-        }
-      } catch (e) {
-        gcsFailed++;
-        console.warn(`[DELETE EVENT ${eventIdVarchar}] image-cleanup feilet for ${img.id}:`, e);
-      }
-    }
-    console.log(`[DELETE EVENT ${eventIdVarchar}] GCS: ${gcsDeleted} slettet, ${gcsFailed} feilet`);
+    const result = await db.update(events)
+      .set({ deleted_at: new Date() })
+      .where(eq(events.id, id));
 
-    // 3. Slett barn-rader (rekkefølge: barn først, så fremtidige FK-CASCADE-ALTER blir trivielt)
-    const likes = await db.delete(event_image_likes).where(eq(event_image_likes.event_id, eventIdVarchar));
-    const imgRows = await db.delete(event_images).where(eq(event_images.event_id, eventIdVarchar));
-    const reminders = await db.delete(event_reminders).where(eq(event_reminders.event_id, eventIdVarchar));
-    const qrDownloads = await db.delete(qr_template_downloads).where(eq(qr_template_downloads.event_id, eventIdVarchar));
-    const guests = await db.delete(event_guest_participants).where(eq(event_guest_participants.event_id, eventIdVarchar));
-
-    console.log(
-      `[DELETE EVENT ${eventIdVarchar}] DB: likes=${likes.rowCount ?? 0}, ` +
-      `images=${imgRows.rowCount ?? 0}, reminders=${reminders.rowCount ?? 0}, ` +
-      `qr=${qrDownloads.rowCount ?? 0}, guests=${guests.rowCount ?? 0}`,
-    );
-
-    // 4. Slett selve event-raden
-    const result = await db.delete(events).where(eq(events.id, id));
     const success = (result.rowCount ?? 0) > 0;
-    console.log(`[DELETE EVENT ${eventIdVarchar}] Ferdig — event-row deleted=${success}`);
+    console.log(`[SOFT-DELETE EVENT ${event.event_id}] uuid=${id} — soft-deleted=${success}`);
     return success;
   }
 
   async listEvents(): Promise<Event[]> {
     return await db.select().from(events)
+      .where(isNull(events.deleted_at))
       .orderBy(desc(events.event_date));
   }
 
   async checkEventExists(eventId: string): Promise<boolean> {
     const [result] = await db.select({ count: sql`COUNT(*)` })
       .from(events)
-      .where(eq(events.event_id, eventId));
+      .where(and(eq(events.event_id, eventId), isNull(events.deleted_at)));
     return Number(result?.count) > 0;
   }
 
