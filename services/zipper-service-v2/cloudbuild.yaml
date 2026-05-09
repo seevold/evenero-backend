@@ -1,0 +1,47 @@
+# Cloud Build pipeline for zipper-service-v2 Cloud Run-deploy.
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    dir: services/zipper-service-v2
+    args:
+      - build
+      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/zipper-service-v2:${SHORT_SHA}
+      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/zipper-service-v2:latest
+      - .
+
+  - id: push-sha
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/zipper-service-v2:${SHORT_SHA}
+
+  - id: push-latest
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/zipper-service-v2:latest
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - zipper-service-v2
+      - --image=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/zipper-service-v2:${SHORT_SHA}
+      - --region=europe-north1
+      - --project=${PROJECT_ID}
+      - --service-account=staging-runner@${PROJECT_ID}.iam.gserviceaccount.com
+      - --set-env-vars=GCS_BUCKET_NAME=evenero-staging-cloud,GCP_PROJECT_ID=${PROJECT_ID},QUEUE_LOCATION=europe-west1,QUEUE_NAME=zip-queue-v2-staging,WORKER_SERVICE_ACCOUNT=staging-runner@${PROJECT_ID}.iam.gserviceaccount.com,SERVICE_URL=https://zipper-service-v2-467452422363.europe-north1.run.app
+      - --memory=512Mi
+      - --cpu=1
+      - --concurrency=3
+      - --max-instances=5
+      - --min-instances=0
+      - --timeout=3600s
+      - --no-allow-unauthenticated
+      - --quiet
+
+options:
+  logging: CLOUD_LOGGING_ONLY

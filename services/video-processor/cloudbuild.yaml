@@ -6,21 +6,21 @@ steps:
     dir: services/video-processor
     args:
       - build
-      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/video-processor:${SHORT_SHA}
-      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/video-processor:latest
+      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/video-processor-v2:${SHORT_SHA}
+      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/video-processor-v2:latest
       - .
 
   - id: push-sha
     name: gcr.io/cloud-builders/docker
     args:
       - push
-      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/video-processor:${SHORT_SHA}
+      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/video-processor-v2:${SHORT_SHA}
 
   - id: push-latest
     name: gcr.io/cloud-builders/docker
     args:
       - push
-      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/video-processor:latest
+      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/video-processor-v2:latest
 
   - id: deploy
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
@@ -28,8 +28,8 @@ steps:
     args:
       - run
       - deploy
-      - video-processor
-      - --image=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/video-processor:${SHORT_SHA}
+      - video-processor-v2
+      - --image=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/video-processor-v2:${SHORT_SHA}
       - --region=europe-north1
       - --project=${PROJECT_ID}
       - --service-account=staging-runner@${PROJECT_ID}.iam.gserviceaccount.com

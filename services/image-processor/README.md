@@ -56,7 +56,7 @@ gsutil ls gs://evenero-staging-cloud/derived/test-event/test-media/
 ## Cloud Run-deploy (anbefalt)
 
 ```bash
-gcloud run deploy image-processor \
+gcloud run deploy image-processor-v2 \
   --source . \
   --region europe-north1 \
   --project evenero \

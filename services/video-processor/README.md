@@ -36,7 +36,7 @@ Universal H.264 (iOS Safari OK), 720p maks bredde, jevn bitrate for mobilnett.
 ## Cloud Run-konfig (deploy-anbefaling)
 
 ```bash
-gcloud run deploy video-processor \
+gcloud run deploy video-processor-v2 \
   --source . \
   --region europe-north1 --project evenero \
   --no-allow-unauthenticated \
