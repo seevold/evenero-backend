@@ -34,6 +34,14 @@ steps:
       - --region=europe-north1
       - --project=${PROJECT_ID}
       - --service-account=staging-runner@${PROJECT_ID}.iam.gserviceaccount.com
+      - --set-env-vars=GCS_BUCKET_NAME=evenero-staging-cloud
+      - --memory=1Gi
+      - --cpu=1
+      - --concurrency=4
+      - --max-instances=25
+      - --min-instances=0
+      - --timeout=120s
+      - --no-allow-unauthenticated
       - --quiet
 
 options:
