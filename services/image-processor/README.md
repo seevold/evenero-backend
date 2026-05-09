@@ -80,3 +80,5 @@ Hopper over hvis `derived/{eventId}/{mediaId}/thumb.webp` finnes fra før. Trygt
 - Korrupt input → 500, Pub/Sub retry, DLQ etter `maxDeliveryAttempts=5`
 - Ukjent path-skjema → 204 (ack, ingen retry — ikke noe å gjøre)
 - Feil bucket → 204 (ack, ikke vår oppgave)
+
+<!-- smoke-test of Cloud Build trigger 2026-05-09T10:35:00Z -->
