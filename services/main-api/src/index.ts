@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
 import { initGoogleCloudStorage } from "./gcs";
 import { runMigrations } from "./migrations";
@@ -9,6 +10,31 @@ function log(message: string) {
 }
 
 const app = express();
+
+// Cloud Run kjører bak Google Frontend som setter X-Forwarded-For. Trust den
+// éne proxien så req.ip blir ekte klient-IP (kritisk for rate-limit-keying).
+app.set("trust proxy", 1);
+
+// Rate-limit på signed-URL-utstedelse. Hindrer at én bruker (IP) drukner
+// upload-pipelinen og forhindrer fakturasjokk via abuse. Tall er liberale —
+// en ekte event-bruker laster opp 50-200 bilder over 5-30 min, godt under taket.
+const uploadUrlLimiter = rateLimit({
+  windowMs: 60_000, // 1 min
+  limit: parseInt(process.env.UPLOAD_URL_RATE_LIMIT_PER_MIN || "200", 10),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { detail: "Too many upload requests, slow down and retry shortly" },
+  // Default keyGenerator bruker req.ip — fungerer korrekt med 'trust proxy' satt.
+});
+
+// Bredere DDoS-vern på alle ruter — tillater normal navigasjon men dreper flood.
+const globalLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: parseInt(process.env.GLOBAL_RATE_LIMIT_PER_MIN || "1000", 10),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { detail: "Rate limit exceeded" },
+});
 
 // CORS — eksplisitt allowlist via env-var (komma-separert)
 // Eksempel: CORS_ORIGINS="https://app.evenero.com,https://evenero-app-staging.vercel.app"
@@ -64,6 +90,10 @@ app.use((req, res, next) => {
 (async () => {
   initGoogleCloudStorage();
   await runMigrations();
+
+  // Rate-limiters MÅ registreres før routes (de er middleware som matcher etter path).
+  app.use(["/generate-signed-url", "/api/generate-signed-url"], uploadUrlLimiter);
+  app.use("/api", globalLimiter);
 
   const server = await registerRoutes(app);
 
