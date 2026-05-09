@@ -109,6 +109,13 @@ app.post('/', async (req, res) => {
     return res.status(204).end();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    // GCS 404: objektet er slettet før vi rakk å prosessere. Ack stille — ingen
+    // grunn til retry. Skjer for test-data og for filer brukeren angrer på upload av.
+    const code = (err as { code?: number })?.code;
+    if (code === 404 || /No such object/.test(message)) {
+      console.log(JSON.stringify({ msg: 'skip-not-found', eventId, mediaId, objectName: event.name }));
+      return res.status(204).end();
+    }
     console.error(
       JSON.stringify({
         msg: 'failed',
