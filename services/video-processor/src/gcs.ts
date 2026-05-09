@@ -31,6 +31,23 @@ export function posterOutputPath(eventId: string, mediaId: string): string {
   return `${config.outputPrefix}/${eventId}/${mediaId}/poster.jpg`;
 }
 
+// Skrives når preview ikke kan genereres (for stor/lang/timeout). Frontend
+// sjekker tilstedeværelse før den prøver preview.mp4. Hvis denne finnes:
+// fall tilbake til original.
+export function skippedFlagPath(eventId: string, mediaId: string): string {
+  return `${config.outputPrefix}/${eventId}/${mediaId}/preview-skipped.json`;
+}
+
+export async function uploadJson(destObject: string, payload: unknown): Promise<void> {
+  await bucket.file(destObject).save(JSON.stringify(payload, null, 2), {
+    contentType: 'application/json',
+    resumable: false,
+    metadata: {
+      cacheControl: 'public, max-age=31536000, immutable',
+    },
+  });
+}
+
 export async function uploadFile(
   localPath: string,
   destObject: string,

@@ -1,51 +1,66 @@
 import { spawn } from 'node:child_process';
+import { stat } from 'node:fs/promises';
 import { config } from './config.js';
 import { ffprobe, shouldSkipReencode, type ProbeResult } from './probe.js';
 
-export type EncodeStrategy = 'remux' | 'reencode';
+export type EncodeStrategy = 'remux' | 'reencode' | 'skipped-too-long' | 'skipped-too-big' | 'skipped-encode-timeout';
 
 export type ProcessResult = {
   strategy: EncodeStrategy;
   probe: ProbeResult;
-  previewBytes: number;
+  previewBytes: number | null;  // null hvis preview ble skipped
   posterBytes: number;
   encodeMs: number;
   posterMs: number;
 };
 
-function runFfmpeg(args: string[]): Promise<void> {
+function runFfmpeg(args: string[], timeoutMs?: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
-    // ffmpeg skriver progress + alt til stderr; behold siste 2KB for feilmelding.
     proc.stderr.on('data', (d) => {
       stderr += d;
       if (stderr.length > 4096) stderr = stderr.slice(-2048);
     });
-    proc.on('error', reject);
+
+    let timer: NodeJS.Timeout | null = null;
+    let killedByTimeout = false;
+    if (timeoutMs && timeoutMs > 0) {
+      timer = setTimeout(() => {
+        killedByTimeout = true;
+        proc.kill('SIGKILL');
+      }, timeoutMs);
+    }
+
+    proc.on('error', (err) => {
+      if (timer) clearTimeout(timer);
+      reject(err);
+    });
     proc.on('close', (code) => {
+      if (timer) clearTimeout(timer);
+      if (killedByTimeout) {
+        const err = new Error(`ffmpeg killed after timeout (${timeoutMs}ms)`);
+        (err as { code?: string }).code = 'ENCODE_TIMEOUT';
+        return reject(err);
+      }
       if (code === 0) resolve();
       else reject(new Error(`ffmpeg exit ${code}: ${stderr.slice(-800)}`));
     });
   });
 }
 
-// Strategi 1 — remux: behold codecs, bare reposisjoner moov-atom for streaming.
-async function remux(input: string, output: string): Promise<void> {
+async function remux(input: string, output: string, timeoutMs: number): Promise<void> {
   await runFfmpeg([
-    '-y',
-    '-i', input,
+    '-y', '-i', input,
     '-c', 'copy',
     '-movflags', '+faststart',
     output,
-  ]);
+  ], timeoutMs);
 }
 
-// Strategi 2 — fullt re-encode til H.264 720p (eller mindre).
-async function reencode(input: string, output: string): Promise<void> {
+async function reencode(input: string, output: string, timeoutMs: number): Promise<void> {
   await runFfmpeg([
-    '-y',
-    '-i', input,
+    '-y', '-i', input,
     '-c:v', 'libx264',
     '-preset', config.preset,
     '-crf', String(config.crf),
@@ -61,10 +76,11 @@ async function reencode(input: string, output: string): Promise<void> {
     '-movflags', '+faststart',
     '-threads', '0',
     output,
-  ]);
+  ], timeoutMs);
 }
 
 async function makePoster(input: string, output: string): Promise<void> {
+  // Kort timeout — poster er bare første frame.
   await runFfmpeg([
     '-y',
     '-ss', config.posterTimestamp,
@@ -73,39 +89,80 @@ async function makePoster(input: string, output: string): Promise<void> {
     '-vf', `scale=${config.posterWidth}:-2`,
     '-q:v', '4',
     output,
-  ]);
+  ], 60_000);
 }
 
-import { stat } from 'node:fs/promises';
+// Avgjør om vi skal hoppe over preview-encoding helt.
+// Frontend faller da tilbake til original-fila.
+function shouldSkipPreview(
+  probe: ProbeResult,
+  sourceBytes: number,
+): EncodeStrategy | null {
+  if (probe.durationSec > config.maxPreviewDurationSec) return 'skipped-too-long';
+  if (sourceBytes > config.maxPreviewBytes) return 'skipped-too-big';
+  return null;
+}
 
 export async function processVideo(
   inputPath: string,
   previewPath: string,
   posterPath: string,
+  sourceBytes: number,
 ): Promise<ProcessResult> {
   const probe = await ffprobe(inputPath);
-  const skip = shouldSkipReencode(probe);
 
-  const t0 = Date.now();
-  if (skip) {
-    await remux(inputPath, previewPath);
-  } else {
-    await reencode(inputPath, previewPath);
-  }
-  const encodeMs = Date.now() - t0;
-
-  const t1 = Date.now();
+  // Poster genereres ALLTID — billig (~1-2 sek), kritisk for galleri.
+  const posterStart = Date.now();
   await makePoster(inputPath, posterPath);
-  const posterMs = Date.now() - t1;
+  const posterMs = Date.now() - posterStart;
+  const posterStat = await stat(posterPath);
 
-  const [prevStat, postStat] = await Promise.all([stat(previewPath), stat(posterPath)]);
+  // Avgjør om preview skal genereres
+  const skipReason = shouldSkipPreview(probe, sourceBytes);
+  if (skipReason) {
+    return {
+      strategy: skipReason,
+      probe,
+      previewBytes: null,
+      posterBytes: posterStat.size,
+      encodeMs: 0,
+      posterMs,
+    };
+  }
+
+  const encodeStart = Date.now();
+  let strategy: EncodeStrategy = shouldSkipReencode(probe) ? 'remux' : 'reencode';
+
+  try {
+    if (strategy === 'remux') {
+      await remux(inputPath, previewPath, config.encodeTimeoutMs);
+    } else {
+      await reencode(inputPath, previewPath, config.encodeTimeoutMs);
+    }
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === 'ENCODE_TIMEOUT') {
+      // Best-effort: encode tok for lang tid. Hopper, frontend faller tilbake.
+      return {
+        strategy: 'skipped-encode-timeout',
+        probe,
+        previewBytes: null,
+        posterBytes: posterStat.size,
+        encodeMs: Date.now() - encodeStart,
+        posterMs,
+      };
+    }
+    throw err; // Ekte ffmpeg-feil — la handleren returnere 500.
+  }
+
+  const previewStat = await stat(previewPath);
 
   return {
-    strategy: skip ? 'remux' : 'reencode',
+    strategy,
     probe,
-    previewBytes: prevStat.size,
-    posterBytes: postStat.size,
-    encodeMs,
+    previewBytes: previewStat.size,
+    posterBytes: posterStat.size,
+    encodeMs: Date.now() - encodeStart,
     posterMs,
   };
 }

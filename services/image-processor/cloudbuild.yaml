@@ -38,7 +38,7 @@ steps:
       - --memory=1Gi
       - --cpu=1
       - --concurrency=4
-      - --max-instances=25
+      - --max-instances=100
       - --min-instances=0
       - --timeout=120s
       - --no-allow-unauthenticated

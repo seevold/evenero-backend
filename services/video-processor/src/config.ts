@@ -23,8 +23,19 @@ export const config = {
   skipMaxBitrate: parseInt(process.env.SKIP_MAX_BITRATE || '4500000', 10), // 4.5 Mbps
   skipCodecs: (process.env.SKIP_CODECS || 'h264').split(','),
 
-  // Hard cap mot megastore videoer.
+  // Hard cap mot megastore videoer (avviser meldingen helt — ikke download).
   maxInputBytes: parseInt(process.env.MAX_INPUT_BYTES || String(5 * 1024 * 1024 * 1024), 10), // 5 GB
+
+  // Best-effort caps: hvis source er over disse, hopper vi over preview-encoding
+  // og lar frontend falle tilbake på original. Skipped-flag skrives så frontend
+  // vet det med en gang (slipper å vente på timeout).
+  // Poster genereres uansett (1-2 sek ffmpeg, kan ikke feile).
+  maxPreviewDurationSec: parseInt(process.env.MAX_PREVIEW_DURATION_SEC || '300', 10),  // 5 min
+  maxPreviewBytes: parseInt(process.env.MAX_PREVIEW_BYTES || String(500 * 1024 * 1024), 10), // 500 MB
+
+  // Hvis ffmpeg fortsatt henger over denne tiden, drep prosessen og fall tilbake
+  // til skipped-flag. Lavere enn Pub/Sub ack-deadline (600s) for å unngå redelivery.
+  encodeTimeoutMs: parseInt(process.env.ENCODE_TIMEOUT_MS || '480000', 10), // 8 min
 
   // Poster-frame.
   posterTimestamp: process.env.POSTER_TIMESTAMP || '00:00:01',

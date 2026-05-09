@@ -10,7 +10,9 @@ import {
   previewAlreadyExists,
   previewOutputPath,
   posterOutputPath,
+  skippedFlagPath,
   uploadFile,
+  uploadJson,
 } from './gcs.js';
 
 const app = express();
@@ -71,15 +73,24 @@ app.post('/', async (req, res) => {
 
   const sourceBytes = parseInt(event.size ?? '0', 10);
   if (sourceBytes > 0 && sourceBytes > config.maxInputBytes) {
-    console.error(
+    // Hard cap — for stor til at vi engang vil laste den ned. Skriv flag og ack.
+    const { eventId, mediaId } = parsed;
+    await uploadJson(skippedFlagPath(eventId, mediaId), {
+      skipped: true,
+      reason: 'source-too-big-to-download',
+      sourceBytes,
+      maxInputBytes: config.maxInputBytes,
+      objectName: event.name,
+      timestamp: new Date().toISOString(),
+    }).catch((e) => console.warn('skipped-flag write failed:', e));
+    console.warn(
       JSON.stringify({
-        msg: 'too-large',
+        msg: 'too-large-hard-cap',
         objectName: event.name,
         sourceBytes,
         maxBytes: config.maxInputBytes,
       }),
     );
-    // Ack — ingen retry på en fil som er for stor.
     return res.status(204).end();
   }
 
@@ -99,13 +110,34 @@ app.post('/', async (req, res) => {
     await downloadObjectToFile(event.name, inputPath);
     const downloadMs = Date.now() - t0;
 
-    const result = await processVideo(inputPath, previewPath, posterPath);
+    const result = await processVideo(inputPath, previewPath, posterPath, sourceBytes);
 
+    // Last opp poster ALLTID (det er alltid generert).
+    // Last opp preview KUN hvis encoding lyktes (ikke skipped).
+    // Skriv skipped.json HVIS preview ble hoppet over.
     const t2 = Date.now();
-    await Promise.all([
-      uploadFile(previewPath, previewOutputPath(eventId, mediaId), 'video/mp4'),
+    const uploads: Promise<void>[] = [
       uploadFile(posterPath, posterOutputPath(eventId, mediaId), 'image/jpeg'),
-    ]);
+    ];
+
+    if (result.previewBytes !== null) {
+      uploads.push(uploadFile(previewPath, previewOutputPath(eventId, mediaId), 'video/mp4'));
+    } else {
+      uploads.push(
+        uploadJson(skippedFlagPath(eventId, mediaId), {
+          skipped: true,
+          reason: result.strategy,
+          sourceBytes,
+          durationSec: result.probe.durationSec,
+          sourceWidth: result.probe.width,
+          sourceHeight: result.probe.height,
+          sourceCodec: result.probe.videoCodec,
+          objectName: event.name,
+          timestamp: new Date().toISOString(),
+        }),
+      );
+    }
+    await Promise.all(uploads);
     const uploadMs = Date.now() - t2;
 
     console.log(
