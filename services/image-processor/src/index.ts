@@ -1,7 +1,14 @@
 import express from 'express';
 import { config } from './config.js';
 import { processImage } from './processor.js';
-import { downloadObject, parseInputPath, uploadVariants, variantsAlreadyExist } from './gcs.js';
+import {
+  downloadObject,
+  parseInputPath,
+  skippedFlagPath,
+  uploadJson,
+  uploadVariants,
+  variantsAlreadyExist,
+} from './gcs.js';
 
 const app = express();
 // Pub/Sub push-meldinger er JSON, små (envelope + base64 GCS event).
@@ -71,6 +78,20 @@ app.post('/', async (req, res) => {
     return res.status(204).end();
   }
 
+  // Helper for best-effort skip-flag (sharp-feil, korrupt input, ukjent format).
+  // Frontend faller tilbake til original-fila.
+  async function writeSkippedFlag(reason: string, errorMessage: string): Promise<void> {
+    await uploadJson(skippedFlagPath(eventId, mediaId), {
+      skipped: true,
+      reason,
+      error: errorMessage,
+      sourceBytes: parseInt(event!.size ?? '0', 10),
+      contentType: event!.contentType,
+      objectName: event!.name,
+      timestamp: new Date().toISOString(),
+    }).catch((e) => console.warn('skipped-flag write failed:', e));
+  }
+
   try {
     if (await variantsAlreadyExist(eventId, mediaId)) {
       console.log(`Skip: derived/${eventId}/${mediaId}/ finnes fra før (idempotent)`);
@@ -78,10 +99,34 @@ app.post('/', async (req, res) => {
     }
 
     const t0 = Date.now();
-    const buf = await downloadObject(event.name);
+    let buf: Buffer;
+    try {
+      buf = await downloadObject(event.name);
+    } catch (err) {
+      const code = (err as { code?: number })?.code;
+      const message = err instanceof Error ? err.message : String(err);
+      if (code === 404 || /No such object/.test(message)) {
+        // Original slettet før prosessering — ack uten flag.
+        console.log(JSON.stringify({ msg: 'skip-not-found', eventId, mediaId, objectName: event.name }));
+        return res.status(204).end();
+      }
+      // GCS-feil (auth, network) → reell retry-verdig feil.
+      throw err;
+    }
     const downloadMs = Date.now() - t0;
 
-    const result = await processImage(buf);
+    let result;
+    try {
+      result = await processImage(buf);
+    } catch (err) {
+      // Sharp-feil = korrupt eller ukjent format. Aldri retry-verdig — ack med flag.
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(
+        JSON.stringify({ msg: 'skipped-sharp-error', eventId, mediaId, objectName: event.name, error: message }),
+      );
+      await writeSkippedFlag('sharp-error', message);
+      return res.status(204).end();
+    }
 
     const t2 = Date.now();
     await uploadVariants(eventId, mediaId, result.variants);
@@ -108,24 +153,13 @@ app.post('/', async (req, res) => {
 
     return res.status(204).end();
   } catch (err) {
+    // Vi har allerede håndtert: GCS 404 (skip), GCS download-error (rethrow),
+    // sharp-error (skip-flag). Det som lander her er upload-feil mot derived/-bucket
+    // — som er en transient infrastrukturfeil og verdig retry.
     const message = err instanceof Error ? err.message : String(err);
-    // GCS 404: objektet er slettet før vi rakk å prosessere. Ack stille — ingen
-    // grunn til retry. Skjer for test-data og for filer brukeren angrer på upload av.
-    const code = (err as { code?: number })?.code;
-    if (code === 404 || /No such object/.test(message)) {
-      console.log(JSON.stringify({ msg: 'skip-not-found', eventId, mediaId, objectName: event.name }));
-      return res.status(204).end();
-    }
     console.error(
-      JSON.stringify({
-        msg: 'failed',
-        eventId,
-        mediaId,
-        objectName: event.name,
-        error: message,
-      }),
+      JSON.stringify({ msg: 'failed', eventId, mediaId, objectName: event.name, error: message }),
     );
-    // 500 → Pub/Sub retry. Korrupte input havner i DLQ etter maxDeliveryAttempts.
     return res.status(500).json({ error: message });
   }
 });

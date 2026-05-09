@@ -53,3 +53,20 @@ export async function variantsAlreadyExist(eventId: string, mediaId: string): Pr
   const [exists] = await bucket.file(outputPath(eventId, mediaId, 'thumb')).exists();
   return exists;
 }
+
+// Skrives når sharp ikke klarer å prosessere bildet (korrupt, ukjent format,
+// for stor til decode). Frontend faller tilbake til original-fila.
+export function skippedFlagPath(eventId: string, mediaId: string): string {
+  return `${config.outputPrefix}/${eventId}/${mediaId}/preview-skipped.json`;
+}
+
+export async function uploadJson(destObject: string, payload: unknown): Promise<void> {
+  const file = bucket.file(destObject);
+  await file.save(JSON.stringify(payload, null, 2), {
+    contentType: 'application/json',
+    resumable: false,
+    metadata: {
+      cacheControl: 'public, max-age=31536000, immutable',
+    },
+  });
+}
