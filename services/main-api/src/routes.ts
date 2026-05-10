@@ -1868,7 +1868,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Support both GET (for manage-event cover uploads) and POST (for regular uploads)
   registerBothPaths("get", "/generate-signed-url", async (req, res) => {
     const fileName = req.query.file_name as string;
-    
+    const clientContentType = req.query.content_type as string | undefined;
+
     if (!fileName) {
       return res.status(400).json({ detail: "Missing file_name parameter" });
     }
@@ -1877,24 +1878,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { generateUploadUrl } = await import('./gcs');
       // For GET requests, generate a simple filename without batch/sequence
       const eventId = fileName.startsWith('cover-') ? 'covers' : 'uploads';
-      
-      // Detect content type from file extension
-      const extension = fileName.split('.').pop()?.toLowerCase();
-      let contentType = 'image/jpeg'; // Default for backward compatibility
-      
-      if (extension === 'mp4' || extension === 'mov') {
-        contentType = 'video/mp4';
-      } else if (extension === 'avi') {
-        contentType = 'video/x-msvideo';
-      } else if (extension === 'wmv') {
-        contentType = 'video/x-ms-wmv';
-      } else if (extension === 'png') {
-        contentType = 'image/png';
-      } else if (extension === 'gif') {
-        contentType = 'image/gif';
-      } else if (extension === 'webp') {
-        contentType = 'image/webp';
-      }
+
+      // Content-Type-håndtering:
+      // 1. Hvis client sender content_type-query (anbefalt) — bruk den. Da matcher
+      //    signed URL-en eksakt det nettleseren sender på PUT.
+      // 2. Hvis ikke (bakoverkompatibilitet med eldre klient): gjett fra extension.
+      //
+      // Bug-historikk: tidligere mappet både .mp4 og .mov til 'video/mp4', men
+      // nettlesere sender 'video/quicktime' for .mov → signaturen avvises av GCS
+      // med 403 Forbidden. Tabellen under er korrigert. Hovedfix er likevel at
+      // klienten nå sender content_type eksplisitt.
+      const extensionMime: Record<string, string> = {
+        // Video
+        mp4: 'video/mp4',
+        mov: 'video/quicktime',
+        m4v: 'video/x-m4v',
+        avi: 'video/x-msvideo',
+        wmv: 'video/x-ms-wmv',
+        webm: 'video/webm',
+        '3gp': 'video/3gpp',
+        mkv: 'video/x-matroska',
+        // Image
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        png: 'image/png',
+        gif: 'image/gif',
+        webp: 'image/webp',
+        heic: 'image/heic',
+        heif: 'image/heif',
+        avif: 'image/avif',
+      };
+
+      const extension = fileName.split('.').pop()?.toLowerCase() ?? '';
+      const contentType = clientContentType || extensionMime[extension] || 'image/jpeg';
       
       const result = await generateUploadUrl(
         eventId, 
