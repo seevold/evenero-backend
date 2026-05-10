@@ -959,6 +959,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const moderationEnabled = event?.image_moderation ?? false;
 
       const images = mediaList.map(item => ({
+        // Hvis klienten sender media_id (fra v2 signed URL-respons), bruk det
+        // som primary key. Da matcher event_images.id mediaId i GCS-pathen
+        // (originals/{eventId}/{mediaId}.{ext}), og gallery-frontend kan
+        // bygge derived-paths direkte fra item.id.
+        // Hvis media_id mangler (eldre klient), faller vi tilbake til
+        // Postgres defaultRandom() ved å la id være undefined.
+        ...(item.media_id ? { id: item.media_id } : {}),
         event_id,
         batch_id,
         image_url: item.url,
@@ -1926,14 +1933,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         url: result.url,
-        public_url: result.publicUrl
+        public_url: result.publicUrl,
+        media_id: result.mediaId,
       });
     } catch (error) {
       console.error('Error generating signed URL (GET):', error);
       res.status(500).json({ detail: "Internal server error" });
     }
   });
-  
+
   registerBothPaths("post", "/generate-signed-url", async (req, res) => {
     const { event_id, batch_id, sequence, filename, content_type } = req.body;
 
@@ -1964,7 +1972,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         upload_url: result.url,
-        public_url: result.publicUrl
+        public_url: result.publicUrl,
+        media_id: result.mediaId,
       });
     } catch (error) {
       console.error('Error generating signed URL:', error);

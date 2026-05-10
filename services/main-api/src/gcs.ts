@@ -30,14 +30,27 @@ export function initGoogleCloudStorage() {
   }
 }
 
-// Generate a signed URL for file upload
+// Generate a signed URL for file upload using v2 path-konvensjon
+//
+// v2 path-konvensjon: originals/{eventId}/{mediaId}.{ext}
+// → utløser Pub/Sub-trigger til image-processor-v2 / video-processor-v2
+// → genererer derived/{eventId}/{mediaId}/{thumb,medium,poster,preview}.*
+//
+// mediaId genereres her (UUID) og returneres i respons. Klienten må
+// bruke denne mediaId-en som event_images.id ved metadata-registrering,
+// slik at gallery-frontend kan bygge derived-paths fra mediaId og
+// vise poster/medium uten å laste video/full bilde.
+//
+// batchId og sequence er beholdt i parameter-signaturen for
+// bakoverkompatibilitet med eldre callers, men brukes ikke lenger i
+// path-en (v2 trenger dem ikke).
 export async function generateUploadUrl(
   eventId: string,
-  batchId: string, 
+  batchId: string,
   sequence: number,
   filename: string,
   contentType: string
-): Promise<{ url: string; publicUrl: string } | null> {
+): Promise<{ url: string; publicUrl: string; mediaId: string } | null> {
   if (!storage) {
     console.error('Google Cloud Storage not initialized');
     return null;
@@ -45,28 +58,30 @@ export async function generateUploadUrl(
 
   try {
     const bucket = storage.bucket(GCS_BUCKET_NAME);
-    
-    // Generate filename matching Python backend format: eventID__BatchID__sequence__originalFilename.ext
-    const ext = path.extname(filename);
-    const baseName = path.basename(filename, ext);
-    const gcsFilename = `images/${eventId}__${batchId}__${sequence}__${baseName}${ext}`;
-    
+
+    // Generer mediaId som UUID — matcher event_images.id-format og er
+    // unikt per opplasting. Vi bruker crypto.randomUUID() (Node 14.17+)
+    // i stedet for nanoid for å unngå ny dependency.
+    const { randomUUID } = await import('crypto');
+    const mediaId = randomUUID();
+
+    const ext = path.extname(filename); // includes leading dot
+    const gcsFilename = `originals/${eventId}/${mediaId}${ext}`;
+
     const file = bucket.file(gcsFilename);
-    
-    // Generate signed URL for upload (valid for 3 hours).
-    // Tidligere 15 min — for kort for store videoer eller trege opplastinger
-    // (event-WiFi, mobile data). 3 timer dekker realistiske worst-case
-    // multi-GB uploads uten at URL-en utløper midt i.
+
+    // Signed URL for upload — gyldig i 3 timer (event-WiFi, mobile data,
+    // multi-GB videoer kan ta tid).
     const [url] = await file.getSignedUrl({
       version: 'v4',
       action: 'write',
-      expires: Date.now() + 3 * 60 * 60 * 1000, // 3 hours
+      expires: Date.now() + 3 * 60 * 60 * 1000,
       contentType,
     });
-    
+
     const publicUrl = `https://storage.googleapis.com/${GCS_BUCKET_NAME}/${gcsFilename}`;
-    
-    return { url, publicUrl };
+
+    return { url, publicUrl, mediaId };
   } catch (error) {
     console.error('Error generating upload URL:', error);
     return null;
