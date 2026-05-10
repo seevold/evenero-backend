@@ -1876,6 +1876,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerBothPaths("get", "/generate-signed-url", async (req, res) => {
     const fileName = req.query.file_name as string;
     const clientContentType = req.query.content_type as string | undefined;
+    const clientEventId = req.query.event_id as string | undefined;
 
     if (!fileName) {
       return res.status(400).json({ detail: "Missing file_name parameter" });
@@ -1883,8 +1884,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     try {
       const { generateUploadUrl } = await import('./gcs');
-      // For GET requests, generate a simple filename without batch/sequence
-      const eventId = fileName.startsWith('cover-') ? 'covers' : 'uploads';
+      // event_id fra query foretrekkes — gir korrekt v2-path
+      // originals/{eventId}/{mediaId}.{ext}. Hvis ikke sendt: fall tilbake
+      // til hardkodet 'covers'/'uploads' (legacy bakoverkompatibilitet).
+      const eventId = clientEventId || (fileName.startsWith('cover-') ? 'covers' : 'uploads');
 
       // Content-Type-håndtering:
       // 1. Hvis client sender content_type-query (anbefalt) — bruk den. Da matcher
