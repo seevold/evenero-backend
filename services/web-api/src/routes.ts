@@ -11,7 +11,10 @@ if (!process.env.STRIPE_SECRET_KEY) {
 }
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-const STRIPE_PRODUCT_ID = 'prod_SOyk4pHGl1dzjN';
+const STRIPE_PRODUCT_ID = process.env.STRIPE_PRODUCT_ID || 'prod_SOyk4pHGl1dzjN';
+if (!process.env.STRIPE_PRODUCT_ID) {
+  console.warn('[stripe] STRIPE_PRODUCT_ID env-var ikke satt, faller tilbake til live product-ID — feiler i test mode');
+}
 const PRICE_CACHE_TTL = 5 * 60 * 1000;
 
 interface PriceCacheEntry {
