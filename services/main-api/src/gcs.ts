@@ -53,11 +53,14 @@ export async function generateUploadUrl(
     
     const file = bucket.file(gcsFilename);
     
-    // Generate signed URL for upload (valid for 15 minutes)
+    // Generate signed URL for upload (valid for 3 hours).
+    // Tidligere 15 min — for kort for store videoer eller trege opplastinger
+    // (event-WiFi, mobile data). 3 timer dekker realistiske worst-case
+    // multi-GB uploads uten at URL-en utløper midt i.
     const [url] = await file.getSignedUrl({
       version: 'v4',
       action: 'write',
-      expires: Date.now() + 15 * 60 * 1000, // 15 minutes
+      expires: Date.now() + 3 * 60 * 60 * 1000, // 3 hours
       contentType,
     });
     
