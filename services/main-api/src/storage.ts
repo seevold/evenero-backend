@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { pool } from "./db";
 import { users, events, event_images, event_reminders, event_guest_participants, feature_requests, event_image_likes, qr_template_downloads } from "@shared/schema";
-import { eq, and, or, sql, desc, isNull, lte, inArray } from "drizzle-orm";
+import { eq, and, or, sql, desc, isNull, lte, gte, inArray } from "drizzle-orm";
 import type { User, InsertUser, Event, InsertEvent, EventImage, InsertEventImage, EventReminder, InsertEventReminder, EventGuestParticipant, InsertEventGuestParticipant, FeatureRequest, InsertFeatureRequest, EventImageLike, InsertEventImageLike, QrTemplateDownload, InsertQrTemplateDownload } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -54,6 +54,8 @@ export interface IStorage {
   getEventReminder(eventId: string, email: string): Promise<EventReminder | undefined>;
   getEventRemindersByEmail(email: string): Promise<EventReminder[]>;
   getPendingReminders(): Promise<EventReminder[]>;
+  claimReminderForSending(reminderId: string): Promise<boolean>;
+  releaseReminderClaim(reminderId: string): Promise<void>;
   markReminderSent(reminderId: string): Promise<void>;
 
   // Storage usage methods
@@ -457,20 +459,83 @@ export class PostgreSQLStorage implements IStorage {
       .orderBy(desc(event_reminders.created_at));
   }
 
+  /**
+   * Hent reminders som skal sendes.
+   *
+   * To grenser:
+   * 1. scheduled_for <= now()  → reminder er klar til å sendes
+   * 2. scheduled_for >= now() - 24h → IKKE for gamle reminders
+   *
+   * Grense 2 er kritisk for migreringsrobusthet: hvis reminder-prosessoren
+   * har vært nede en periode (Replit→Cloud Run-cutover, deploy-vindu,
+   * regional outage) ville alle missed reminders blitt sendt på en gang —
+   * brukere får e-poster for events som er for lengst forbi. Med 24t-cutoff
+   * blir reminders som ble forsinket mer enn et døgn skip-pet stille.
+   * De forblir reminder_sent=false i DB (man kan se hva som ble missed),
+   * men sendes aldri.
+   */
   async getPendingReminders(): Promise<EventReminder[]> {
     const now = new Date();
+    const maxAgeHours = 24;
+    const cutoff = new Date(now.getTime() - maxAgeHours * 60 * 60 * 1000);
     return await db.select().from(event_reminders)
       .where(and(
         eq(event_reminders.reminder_sent, false),
-        lte(event_reminders.scheduled_for, now)
+        lte(event_reminders.scheduled_for, now),
+        gte(event_reminders.scheduled_for, cutoff),
       ));
   }
 
+  /**
+   * Atomisk "claim" av en reminder for sending. Returnerer true hvis denne
+   * prosessen klarte å markere reminder som sent (= ingen andre har sendt
+   * den), false hvis noen andre allerede har gjort det.
+   *
+   * Bruksmønster i sender:
+   *   const claimed = await storage.claimReminderForSending(id);
+   *   if (!claimed) continue;  // noen andre prosesserer denne
+   *   const ok = await sendEmail(...);
+   *   if (!ok) await storage.releaseReminderClaim(id);  // gi tilbake
+   *
+   * Beskytter mot dobbelt-sending hvis to prosessorer kjører parallellt
+   * (relevant under Replit→Cloud Run-cutover med kort overlapping-vindu).
+   *
+   * Atomisk fordi PostgreSQL UPDATE er låst på row-nivå og WHERE-conditional
+   * sikrer at to samtidige updates ikke begge lykkes.
+   */
+  async claimReminderForSending(reminderId: string): Promise<boolean> {
+    const result = await db.update(event_reminders)
+      .set({
+        reminder_sent: true,
+        reminder_sent_at: new Date(),
+      })
+      .where(and(
+        eq(event_reminders.id, reminderId),
+        eq(event_reminders.reminder_sent, false),
+      ))
+      .returning({ id: event_reminders.id });
+    return result.length > 0;
+  }
+
+  /**
+   * Frigir en claim hvis sending feilet. Setter reminder_sent=false så
+   * neste prosessering-runde kan prøve igjen.
+   */
+  async releaseReminderClaim(reminderId: string): Promise<void> {
+    await db.update(event_reminders)
+      .set({ reminder_sent: false, reminder_sent_at: null })
+      .where(eq(event_reminders.id, reminderId));
+  }
+
+  /**
+   * Legacy: behold for å ikke knekke andre callsteder. Nye sendere bør
+   * bruke claimReminderForSending() (atomisk).
+   */
   async markReminderSent(reminderId: string): Promise<void> {
     await db.update(event_reminders)
-      .set({ 
-        reminder_sent: true, 
-        reminder_sent_at: new Date() 
+      .set({
+        reminder_sent: true,
+        reminder_sent_at: new Date()
       })
       .where(eq(event_reminders.id, reminderId));
   }

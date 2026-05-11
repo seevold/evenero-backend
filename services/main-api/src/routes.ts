@@ -1799,19 +1799,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // PUBLIC_APP_URL settes per miljø: staging=evenero-app-staging.vercel.app, prod=app.evenero.com
       const baseUrl = process.env.PUBLIC_APP_URL || "https://app.evenero.com";
       
+      let skipped = 0;
       for (const reminder of pendingReminders) {
         try {
-          const event = await storage.getEvent(reminder.event_id);
-          if (!event) {
-            console.log(`[REMINDER] Event ${reminder.event_id} not found, marking as sent`);
-            await storage.markReminderSent(reminder.id);
+          // Atomic claim FØR sending — beskytter mot dobbelt-sending hvis to
+          // prosessorer kjører parallellt (relevant under cutover-vinduet).
+          // Hvis noen andre allerede har sendt: hopp over uten å sende.
+          const claimed = await storage.claimReminderForSending(reminder.id);
+          if (!claimed) {
+            skipped++;
+            console.log(`[REMINDER] Skip ${reminder.id} — already claimed by another worker`);
             continue;
           }
-          
+
+          const event = await storage.getEvent(reminder.event_id);
+          if (!event) {
+            // Event slettet → reminder er allerede markert sent via claim, ingen e-post sendes.
+            console.log(`[REMINDER] Event ${reminder.event_id} not found, skipping send`);
+            continue;
+          }
+
           const { sendEventReminderEmail } = await import('./email');
           const galleryUrl = `${baseUrl}/gallery/${reminder.event_id}`;
-          
-          // Determine locale: stored reminder locale > user preference > 'en'
+
           const user = await storage.getUserByEmail(reminder.email);
           let locale: 'en' | 'nb' | 'sv' | 'es' = 'en';
           const reminderLocale = (reminder as any).locale;
@@ -1820,35 +1830,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else if (user?.preferred_locale === 'nb' || user?.preferred_locale === 'sv' || user?.preferred_locale === 'en' || user?.preferred_locale === 'es') {
             locale = user.preferred_locale as 'en' | 'nb' | 'sv' | 'es';
           }
-          
+
           console.log(`[REMINDER] Sending to ${reminder.email} with locale: ${locale}`);
-          
+
           const success = await sendEventReminderEmail(
             reminder.email,
             event.event_name || 'Event',
             galleryUrl,
             locale
           );
-          
+
           if (success) {
-            await storage.markReminderSent(reminder.id);
             sent++;
             console.log(`[REMINDER] Sent reminder to ${reminder.email} for event ${reminder.event_id}`);
           } else {
+            // Sending feilet — frigi claim så neste runde kan prøve igjen.
+            await storage.releaseReminderClaim(reminder.id);
             failed++;
-            console.error(`[REMINDER] Failed to send reminder to ${reminder.email}`);
+            console.error(`[REMINDER] Failed to send reminder to ${reminder.email}, claim released`);
           }
         } catch (reminderError) {
+          // Ukjent feil etter claim → release for retry neste runde
+          try { await storage.releaseReminderClaim(reminder.id); } catch {}
           failed++;
           console.error(`[REMINDER] Error processing reminder ${reminder.id}:`, reminderError);
         }
       }
       
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         processed: pendingReminders.length,
         sent,
-        failed 
+        failed,
+        skipped,
       });
     } catch (error) {
       console.error('[REMINDER] Error processing reminders:', error);
