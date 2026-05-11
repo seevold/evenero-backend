@@ -171,10 +171,37 @@ export const event_guest_participants = pgTable("event_guest_participants", {
   emailIdx: index("idx_guest_email").on(table.email)
 }));
 
+export const ZIP_JOB_STATUS = ['pending', 'completed', 'failed'] as const;
+export type ZipJobStatus = typeof ZIP_JOB_STATUS[number];
+
+export const ZIP_JOB_SCOPE = ['all', 'subset'] as const;
+export type ZipJobScope = typeof ZIP_JOB_SCOPE[number];
+
+// Zip generation jobs - tracks /download-images and /zip-all requests
+export const zip_jobs = pgTable("zip_jobs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  job_id: varchar("job_id", { length: 64 }).notNull().unique(),
+  event_id: varchar("event_id", { length: 255 }).notNull(),
+  requested_by: varchar("requested_by", { length: 255 }).notNull(),
+  scope: varchar("scope", { length: 16 }).notNull(),
+  requested_count: integer("requested_count").notNull(),
+  status: varchar("status", { length: 16 }).default("pending").notNull(),
+  file_count: integer("file_count"),
+  size_mb: real("size_mb"),
+  signed_url: text("signed_url"),
+  expires_at: timestamp("expires_at"),
+  error: text("error"),
+  created_at: timestamp("created_at").defaultNow().notNull(),
+  completed_at: timestamp("completed_at")
+}, (table) => ({
+  eventIdx: index("idx_zip_jobs_event").on(table.event_id, table.created_at),
+  statusIdx: index("idx_zip_jobs_event_status").on(table.event_id, table.status)
+}));
+
 // Insert schemas
-export const insertUserSchema = createInsertSchema(users).omit({ 
-  id: true, 
-  created_at: true 
+export const insertUserSchema = createInsertSchema(users).omit({
+  id: true,
+  created_at: true
 });
 
 export const insertEventSchema = createInsertSchema(events).omit({ 
@@ -247,6 +274,9 @@ export type InsertQrTemplateDownload = z.infer<typeof insertQrTemplateDownloadSc
 
 export type FeatureRequest = typeof feature_requests.$inferSelect;
 export type InsertFeatureRequest = z.infer<typeof insertFeatureRequestSchema>;
+
+export type ZipJob = typeof zip_jobs.$inferSelect;
+export type InsertZipJob = typeof zip_jobs.$inferInsert;
 
 // Legacy compatibility types for frontend (will refactor later)
 export type Media = {

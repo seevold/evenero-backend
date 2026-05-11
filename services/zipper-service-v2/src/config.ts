@@ -32,6 +32,9 @@ export const config = {
 
   // Webhook ved fullført/feilet ZIP. Optional.
   webhookUrl: process.env.WEBHOOK_URL || '',
+  // Delt secret som sendes som X-API-Key i webhook-kallet, så mottaker kan
+  // validere at callbacket kommer fra oss. Optional — utelates ved tomstring.
+  webhookApiKey: process.env.WEBHOOK_API_KEY || '',
 
   // ZIP-ytelse: archiver buffer + read chunk size. Identisk med v1.
   archiverHighWaterMark: parseInt(process.env.ARCHIVER_HIGH_WATER_MARK || String(512 * 1024), 10),

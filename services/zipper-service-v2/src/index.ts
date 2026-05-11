@@ -129,12 +129,16 @@ app.post('/process-zip', async (req, res) => {
 
 async function sendWebhook(eventType: string, payload: Record<string, unknown>): Promise<void> {
   if (!config.webhookUrl) return;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Event-Type': eventType,
+  };
+  if (config.webhookApiKey) {
+    headers['X-API-Key'] = config.webhookApiKey;
+  }
   await fetch(config.webhookUrl, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Event-Type': eventType,
-    },
+    headers,
     body: JSON.stringify({ ...payload, timestamp: new Date().toISOString() }),
   });
 }

@@ -4,10 +4,11 @@ import { storage } from "./storage";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { z } from "zod";
-import type { User, Event, EventImage } from "@shared/schema";
+import type { User, Event, EventImage, ZipJob } from "@shared/schema";
 import { insertFeatureRequestSchema } from "@shared/schema";
 import { getUploadStatus } from "@shared/eventUtils";
 import { OAuth2Client } from 'google-auth-library';
+import { startZipJob, isZipperV2Configured } from './zipper-v2-client';
 
 // JWT secret - REQUIRED environment variable (no fallback for security)
 if (!process.env.JWT_SECRET) {
@@ -2022,41 +2023,158 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Webhook endpoint - receives callback from Cloud Run when zip is ready
-  // Register on /api/zip-ready directly (Cloud Run calls this path)
+  // ---------- Zip download helpers ----------
+
+  function extractMediaFilenames(mediaObjects: EventImage[]): string[] {
+    return mediaObjects.map(media => {
+      const url = media.image_url;
+      const match = url.match(/\/images\/(.+)$/);
+      return match ? match[1] : null;
+    }).filter((v): v is string => !!v);
+  }
+
+  type ZipStartResult =
+    | { kind: 'started'; job: ZipJob }
+    | { kind: 'reused'; job: ZipJob }
+    | { kind: 'busy'; activeJob: ZipJob }
+    | { kind: 'error'; status: number; detail: string };
+
+  async function startZipForEvent(opts: {
+    event: Event;
+    requestedBy: string;
+    mediaObjects: EventImage[];
+    scope: 'all' | 'subset';
+  }): Promise<ZipStartResult> {
+    const { event, requestedBy, mediaObjects, scope } = opts;
+
+    if (!isZipperV2Configured()) {
+      console.error('Zipper v2 not configured (ZIPPER_V2_URL missing)');
+      return { kind: 'error', status: 500, detail: 'Server misconfigured' };
+    }
+
+    // For full-event scope, reuse any non-expired completed/pending 'all' job
+    if (scope === 'all') {
+      const reusable = await storage.getReusableAllZipJobForEvent(event.id);
+      if (reusable) {
+        return { kind: 'reused', job: reusable };
+      }
+    }
+
+    // One active job per event (any scope)
+    const active = await storage.getActiveZipJobForEvent(event.id);
+    if (active) {
+      return { kind: 'busy', activeJob: active };
+    }
+
+    const mediaFilenames = extractMediaFilenames(mediaObjects);
+    if (mediaFilenames.length === 0) {
+      return { kind: 'error', status: 400, detail: 'No downloadable media found' };
+    }
+
+    let zipResponse;
+    try {
+      zipResponse = await startZipJob({
+        mediaIds: mediaFilenames,
+        userEmail: requestedBy,
+        eventName: event.event_name || 'your event',
+        eventId: event.id,
+      });
+    } catch (err) {
+      console.error('Zipper v2 call failed:', err);
+      return { kind: 'error', status: 502, detail: 'Failed to start zip generation' };
+    }
+
+    const job = await storage.createZipJob({
+      job_id: zipResponse.jobId,
+      event_id: event.id,
+      requested_by: requestedBy,
+      scope,
+      requested_count: mediaFilenames.length,
+      status: 'pending',
+    });
+
+    return { kind: 'started', job };
+  }
+
+  function serializeZipJob(job: ZipJob) {
+    return {
+      id: job.id,
+      job_id: job.job_id,
+      event_id: job.event_id,
+      requested_by: job.requested_by,
+      scope: job.scope,
+      requested_count: job.requested_count,
+      status: job.status,
+      file_count: job.file_count,
+      size_mb: job.size_mb,
+      signed_url: job.signed_url,
+      expires_at: job.expires_at,
+      error: job.error,
+      created_at: job.created_at,
+      completed_at: job.completed_at,
+    };
+  }
+
+  // Webhook endpoint - receives callback from zipper-service-v2 (and legacy v1) when zip is ready.
+  // v2 sends X-Event-Type header + jobId in body; we update the matching zip_jobs row.
   app.post("/api/zip-ready", async (req, res) => {
-    console.error('=== WEBHOOK RECEIVED ===');
+    console.error('=== ZIP WEBHOOK RECEIVED ===');
     console.error('Headers:', JSON.stringify(req.headers, null, 2));
     console.error('Body:', JSON.stringify(req.body, null, 2));
-    
-    // Validate API key
-    const apiKey = req.headers['x-api-key'] as string;
+
+    // Accept either OIDC (preferred, validated upstream by Cloud Run if configured)
+    // or legacy X-API-Key from the v1 zipper still running in prod.
+    const apiKey = req.headers['x-api-key'] as string | undefined;
     const expectedKey = process.env.WEBHOOK_API_KEY;
-    
-    if (!expectedKey) {
-      console.error('WARNING: WEBHOOK_API_KEY not configured in environment');
-      return res.status(500).json({ error: "Server configuration error" });
+    const hasOidc = !!req.headers['authorization'];
+
+    if (!hasOidc) {
+      if (!expectedKey) {
+        console.error('WARNING: WEBHOOK_API_KEY not configured and no OIDC header');
+        return res.status(500).json({ error: "Server configuration error" });
+      }
+      if (!apiKey || apiKey !== expectedKey) {
+        console.error('Invalid API key received');
+        return res.status(401).json({ error: "Unauthorized" });
+      }
     }
-    
-    if (!apiKey || apiKey !== expectedKey) {
-      console.error('Invalid API key received');
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-    
+
     try {
-      const { status, zipUrl, fileCount, sizeMB, userEmail, eventName, error } = req.body;
-      
-      console.error('Extracted data:', { status, hasZipUrl: !!zipUrl, userEmail, eventName });
-      
-      // Process webhook if authentication successful
+      const body = req.body as Record<string, unknown>;
+      const status = body.status as string | undefined;
+      const zipUrl = body.zipUrl as string | undefined;
+      const fileCount = body.fileCount as number | undefined;
+      const sizeMB = body.sizeMB as number | undefined;
+      const userEmail = body.userEmail as string | undefined;
+      const eventName = body.eventName as string | undefined;
+      const jobId = body.jobId as string | undefined;
+      const error = body.error as string | undefined;
+
+      // Update DB row if we have jobId
+      if (jobId) {
+        const SIGNED_URL_TTL_DAYS = Number(process.env.SIGNED_URL_EXPIRY_DAYS || 7);
+        const expiresAt = status === 'completed' && zipUrl
+          ? new Date(Date.now() + SIGNED_URL_TTL_DAYS * 24 * 60 * 60 * 1000)
+          : null;
+
+        await storage.updateZipJobOnCompletion(jobId, {
+          status: status === 'completed' ? 'completed' : 'failed',
+          signed_url: zipUrl ?? null,
+          file_count: fileCount ?? null,
+          size_mb: sizeMB ?? null,
+          expires_at: expiresAt,
+          error: status === 'completed' ? null : (error || 'Unknown error'),
+        });
+      } else {
+        console.error('Webhook payload missing jobId — cannot update zip_jobs row');
+      }
+
+      // Send email on success (regardless of whether we found a DB row)
       if (status === 'completed' && zipUrl && userEmail) {
-        console.error('Calling sendZipDownloadEmail...');
-        
-        // Get user's preferred locale for email (normalize email case for lookup)
         const normalizedEmail = userEmail.toLowerCase().trim();
         const user = await storage.getUserByEmail(normalizedEmail);
         const userLocale = (user?.preferred_locale || 'en') as 'en' | 'nb';
-        
+
         const { sendZipDownloadEmail } = await import('./email');
         const result = await sendZipDownloadEmail(
           userEmail,
@@ -2067,15 +2185,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userLocale
         );
         console.error('Email send result:', result);
-        console.error('Email sent to:', userEmail);
       } else if (status === 'failed' || error) {
         console.error('Zip generation failed:', error);
-        // Could optionally send an error email to user here
-      } else {
-        console.error('Missing required data - not sending email');
-        console.error('Status:', status, 'ZipUrl:', zipUrl ? 'present' : 'missing', 'UserEmail:', userEmail);
       }
-      
+
       res.json({ message: "OK" });
     } catch (err) {
       console.error('Webhook error:', err);
@@ -2083,104 +2196,156 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Subset zip - called from gallery (user picked specific media)
   registerBothPaths("post", "/download-images", async (req, res) => {
     const { image_ids, event_id } = req.body;
 
     if (!image_ids || !Array.isArray(image_ids) || image_ids.length === 0) {
       return res.status(400).json({ detail: "No image IDs provided" });
     }
-
     if (!event_id) {
       return res.status(400).json({ detail: "Event ID required" });
     }
 
-    // Get token from Authorization header
     const token = getTokenFromHeader(req);
     if (!token) {
       return res.status(401).json({ detail: "Authentication required. Include token in Authorization header." });
     }
 
     try {
-      // Verify token and get authenticated user email
       const authenticatedEmail = await verifyToken(token);
       if (!authenticatedEmail) {
         return res.status(401).json({ detail: "Invalid or expired token" });
       }
 
-      // Get event details
       const event = await storage.getEvent(event_id);
       if (!event) {
         return res.status(404).json({ detail: "Event not found" });
       }
 
-      // Check if authenticated user has access to the event
       const hasAccess = await hasEventAccess(authenticatedEmail, event);
       if (!hasAccess) {
         console.warn(`Access denied: ${authenticatedEmail} attempted to download from event ${event_id}`);
-        return res.status(403).json({ 
-          detail: "Access denied. You don't have permission to download images from this event." 
+        return res.status(403).json({ detail: "Access denied." });
+      }
+
+      const mediaObjects = await storage.getEventImagesByIds(image_ids);
+      const result = await startZipForEvent({
+        event,
+        requestedBy: authenticatedEmail,
+        mediaObjects,
+        scope: 'subset',
+      });
+
+      if (result.kind === 'busy') {
+        return res.status(409).json({
+          detail: "A zip job is already in progress for this event.",
+          active_job: serializeZipJob(result.activeJob),
         });
       }
-
-      const eventName = event.event_name || 'your event';
-      const user_email = authenticatedEmail; // Use authenticated email for notification
-
-      // Get media objects to extract filenames from image_url
-      const mediaObjects = await storage.getEventImagesByIds(image_ids);
-      
-      // Extract filenames from image_url (everything after /images/)
-      const mediaFilenames = mediaObjects.map(media => {
-        const url = media.image_url;
-        const match = url.match(/\/images\/(.+)$/);
-        return match ? match[1] : null;
-      }).filter(Boolean); // Remove any nulls
-      
-      if (mediaFilenames.length === 0) {
-        return res.status(400).json({ detail: "Could not extract filenames from image URLs" });
+      if (result.kind === 'error') {
+        return res.status(result.status).json({ detail: result.detail });
       }
-      
-      console.log(`Converting ${image_ids.length} UUIDs to ${mediaFilenames.length} filenames`);
-      console.log('Sample filename:', mediaFilenames[0]);
-
-      // Call new Cloud Run zipper service with API key
-      const cloudRunUrl = process.env.CLOUD_RUN_ZIP_URL || 'https://zipper-service-467452422363.europe-west1.run.app/zip';
-      const apiKey = process.env.WEBHOOK_API_KEY;
-      
-      if (!apiKey) {
-        console.error('WARNING: WEBHOOK_API_KEY not configured');
-        return res.status(500).json({ detail: "Server configuration error - missing API key" });
-      }
-      
-      console.log(`Calling Cloud Run zipper service for ${mediaFilenames.length} images...`);
-
-      const response = await fetch(cloudRunUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey
-        },
-        body: JSON.stringify({
-          mediaIds: mediaFilenames,
-          userEmail: user_email,
-          eventName: eventName,
-          eventId: event_id
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Cloud Run error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = (await response.json()) as { estimatedTime?: string };
-
-      // Return immediate response - user will get email when zip is ready
-      res.json({
+      // 'reused' can't happen for subset
+      return res.json({
         message: "Zip generation started. You will receive an email when ready.",
-        estimatedTime: data.estimatedTime || "5-30 minutes"
+        estimatedTime: "5-30 minutes",
+        job: serializeZipJob(result.job),
       });
     } catch (error) {
-      console.error('Error calling Cloud Run:', error);
+      console.error('Error in /download-images:', error);
       res.status(500).json({ detail: "Failed to start zip generation" });
+    }
+  });
+
+  // Full-event "Download all media" zip
+  registerBothPaths("post", "/events/:event_id/zip-all", async (req, res) => {
+    const { event_id } = req.params;
+    if (!event_id) return res.status(400).json({ detail: "Event ID required" });
+
+    const token = getTokenFromHeader(req);
+    if (!token) return res.status(401).json({ detail: "Authentication required." });
+
+    try {
+      const authenticatedEmail = await verifyToken(token);
+      if (!authenticatedEmail) {
+        return res.status(401).json({ detail: "Invalid or expired token" });
+      }
+
+      const event = await storage.getEvent(event_id);
+      if (!event) return res.status(404).json({ detail: "Event not found" });
+
+      const isManager = await isEventOwnerOrCoHost(authenticatedEmail, event);
+      if (!isManager) {
+        return res.status(403).json({ detail: "Only the event owner or co-hosts can download all media." });
+      }
+
+      const allMedia = await storage.getEventImages(event_id);
+      if (allMedia.length === 0) {
+        return res.status(400).json({ detail: "No media available to download." });
+      }
+
+      const result = await startZipForEvent({
+        event,
+        requestedBy: authenticatedEmail,
+        mediaObjects: allMedia,
+        scope: 'all',
+      });
+
+      if (result.kind === 'busy') {
+        return res.status(409).json({
+          detail: "A zip job is already in progress for this event.",
+          active_job: serializeZipJob(result.activeJob),
+        });
+      }
+      if (result.kind === 'reused') {
+        return res.json({
+          reused: true,
+          message: "A recent full-event zip is available.",
+          job: serializeZipJob(result.job),
+        });
+      }
+      if (result.kind === 'error') {
+        return res.status(result.status).json({ detail: result.detail });
+      }
+      return res.json({
+        message: "Zip generation started. You will receive an email when ready.",
+        estimatedFiles: allMedia.length,
+        job: serializeZipJob(result.job),
+      });
+    } catch (error) {
+      console.error('Error in /events/:event_id/zip-all:', error);
+      res.status(500).json({ detail: "Failed to start zip generation" });
+    }
+  });
+
+  // List recent zip jobs for an event (owner/co-host only)
+  registerBothPaths("get", "/events/:event_id/zip-jobs", async (req, res) => {
+    const { event_id } = req.params;
+    if (!event_id) return res.status(400).json({ detail: "Event ID required" });
+
+    const token = getTokenFromHeader(req);
+    if (!token) return res.status(401).json({ detail: "Authentication required." });
+
+    try {
+      const authenticatedEmail = await verifyToken(token);
+      if (!authenticatedEmail) {
+        return res.status(401).json({ detail: "Invalid or expired token" });
+      }
+
+      const event = await storage.getEvent(event_id);
+      if (!event) return res.status(404).json({ detail: "Event not found" });
+
+      const isManager = await isEventOwnerOrCoHost(authenticatedEmail, event);
+      if (!isManager) {
+        return res.status(403).json({ detail: "Only the event owner or co-hosts can view zip jobs." });
+      }
+
+      const jobs = await storage.listZipJobsForEvent(event_id, 10);
+      res.json({ jobs: jobs.map(serializeZipJob) });
+    } catch (error) {
+      console.error('Error in /events/:event_id/zip-jobs:', error);
+      res.status(500).json({ detail: "Failed to list zip jobs" });
     }
   });
 

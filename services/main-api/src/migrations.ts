@@ -93,6 +93,63 @@ CREATE INDEX IF NOT EXISTS idx_image_likes_image_id ON event_image_likes(image_i
       console.log('[MIGRATIONS] event_reminders locale column exists');
     }
 
+    // Check for zip_jobs table
+    const zipJobsTableResult = await client.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_name = 'zip_jobs'
+    `);
+
+    if (zipJobsTableResult.rows.length === 0) {
+      console.log('[MIGRATIONS] Missing zip_jobs table, creating...');
+      try {
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS zip_jobs (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            job_id VARCHAR(64) NOT NULL UNIQUE,
+            event_id VARCHAR(255) NOT NULL,
+            requested_by VARCHAR(255) NOT NULL,
+            scope VARCHAR(16) NOT NULL,
+            requested_count INTEGER NOT NULL,
+            status VARCHAR(16) DEFAULT 'pending' NOT NULL,
+            file_count INTEGER,
+            size_mb REAL,
+            signed_url TEXT,
+            expires_at TIMESTAMP,
+            error TEXT,
+            created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+            completed_at TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_zip_jobs_event ON zip_jobs(event_id, created_at);
+          CREATE INDEX IF NOT EXISTS idx_zip_jobs_event_status ON zip_jobs(event_id, status);
+        `);
+        console.log('[MIGRATIONS] Created zip_jobs table');
+      } catch (createError) {
+        console.log('[MIGRATIONS] ⚠️  Could not create zip_jobs automatically. Run this SQL as database owner:');
+        console.log(`
+CREATE TABLE IF NOT EXISTS zip_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id VARCHAR(64) NOT NULL UNIQUE,
+  event_id VARCHAR(255) NOT NULL,
+  requested_by VARCHAR(255) NOT NULL,
+  scope VARCHAR(16) NOT NULL,
+  requested_count INTEGER NOT NULL,
+  status VARCHAR(16) DEFAULT 'pending' NOT NULL,
+  file_count INTEGER,
+  size_mb REAL,
+  signed_url TEXT,
+  expires_at TIMESTAMP,
+  error TEXT,
+  created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+  completed_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_zip_jobs_event ON zip_jobs(event_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_zip_jobs_event_status ON zip_jobs(event_id, status);
+        `);
+      }
+    } else {
+      console.log('[MIGRATIONS] zip_jobs table exists');
+    }
+
     console.log('[MIGRATIONS] Schema check completed');
   } catch (error) {
     console.error('[MIGRATIONS] Error checking schema:', error);

@@ -1,8 +1,8 @@
 import { db } from "./db";
 import { pool } from "./db";
-import { users, events, event_images, event_reminders, event_guest_participants, feature_requests, event_image_likes, qr_template_downloads } from "@shared/schema";
+import { users, events, event_images, event_reminders, event_guest_participants, feature_requests, event_image_likes, qr_template_downloads, zip_jobs } from "@shared/schema";
 import { eq, and, or, sql, desc, isNull, lte, gte, inArray } from "drizzle-orm";
-import type { User, InsertUser, Event, InsertEvent, EventImage, InsertEventImage, EventReminder, InsertEventReminder, EventGuestParticipant, InsertEventGuestParticipant, FeatureRequest, InsertFeatureRequest, EventImageLike, InsertEventImageLike, QrTemplateDownload, InsertQrTemplateDownload } from "@shared/schema";
+import type { User, InsertUser, Event, InsertEvent, EventImage, InsertEventImage, EventReminder, InsertEventReminder, EventGuestParticipant, InsertEventGuestParticipant, FeatureRequest, InsertFeatureRequest, EventImageLike, InsertEventImageLike, QrTemplateDownload, InsertQrTemplateDownload, ZipJob, InsertZipJob } from "@shared/schema";
 import { randomUUID } from "crypto";
 
 // Custom alphabet for short IDs (matching Python backend)
@@ -145,6 +145,14 @@ export interface IStorage {
   // QR code generator settings (per-event)
   getQrSettings(eventId: string): Promise<QRCodeSettings | null>;
   saveQrSettings(eventId: string, settings: QRCodeSettings): Promise<void>;
+
+  // Zip job methods
+  createZipJob(job: InsertZipJob): Promise<ZipJob>;
+  getZipJob(jobId: string): Promise<ZipJob | undefined>;
+  getActiveZipJobForEvent(eventId: string): Promise<ZipJob | undefined>;
+  getReusableAllZipJobForEvent(eventId: string): Promise<ZipJob | undefined>;
+  listZipJobsForEvent(eventId: string, limit?: number): Promise<ZipJob[]>;
+  updateZipJobOnCompletion(jobId: string, updates: { status: 'completed' | 'failed'; signed_url?: string | null; file_count?: number | null; size_mb?: number | null; expires_at?: Date | null; error?: string | null }): Promise<ZipJob | undefined>;
 }
 
 // QR Code Generator settings type
@@ -1491,6 +1499,67 @@ export class PostgreSQLStorage implements IStorage {
       console.error('[QR SETTINGS] Error saving QR settings:', error);
       throw error;
     }
+  }
+
+  // Zip job methods
+  async createZipJob(job: InsertZipJob): Promise<ZipJob> {
+    const [created] = await db.insert(zip_jobs).values(job).returning();
+    return created;
+  }
+
+  async getZipJob(jobId: string): Promise<ZipJob | undefined> {
+    const [job] = await db.select().from(zip_jobs).where(eq(zip_jobs.job_id, jobId));
+    return job;
+  }
+
+  async getActiveZipJobForEvent(eventId: string): Promise<ZipJob | undefined> {
+    const [job] = await db.select()
+      .from(zip_jobs)
+      .where(and(eq(zip_jobs.event_id, eventId), eq(zip_jobs.status, 'pending')))
+      .orderBy(desc(zip_jobs.created_at))
+      .limit(1);
+    return job;
+  }
+
+  async getReusableAllZipJobForEvent(eventId: string): Promise<ZipJob | undefined> {
+    const now = new Date();
+    const [job] = await db.select()
+      .from(zip_jobs)
+      .where(and(
+        eq(zip_jobs.event_id, eventId),
+        eq(zip_jobs.scope, 'all'),
+        or(
+          eq(zip_jobs.status, 'pending'),
+          and(eq(zip_jobs.status, 'completed'), gte(zip_jobs.expires_at, now))
+        )
+      ))
+      .orderBy(desc(zip_jobs.created_at))
+      .limit(1);
+    return job;
+  }
+
+  async listZipJobsForEvent(eventId: string, limit = 10): Promise<ZipJob[]> {
+    return await db.select()
+      .from(zip_jobs)
+      .where(eq(zip_jobs.event_id, eventId))
+      .orderBy(desc(zip_jobs.created_at))
+      .limit(limit);
+  }
+
+  async updateZipJobOnCompletion(jobId: string, updates: { status: 'completed' | 'failed'; signed_url?: string | null; file_count?: number | null; size_mb?: number | null; expires_at?: Date | null; error?: string | null }): Promise<ZipJob | undefined> {
+    const [updated] = await db.update(zip_jobs)
+      .set({
+        status: updates.status,
+        signed_url: updates.signed_url ?? null,
+        file_count: updates.file_count ?? null,
+        size_mb: updates.size_mb ?? null,
+        expires_at: updates.expires_at ?? null,
+        error: updates.error ?? null,
+        completed_at: new Date()
+      })
+      .where(eq(zip_jobs.job_id, jobId))
+      .returning();
+    return updated;
   }
 }
 
