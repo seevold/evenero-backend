@@ -2025,12 +2025,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ---------- Zip download helpers ----------
 
+  // image_url i DB peker alltid på originalen (Cloud Functions skriver _small/_compressed
+  // som SEPARATE filer, ikke som image_url-verdi). Vi bruker siste path-segment som mediaId
+  // — zipper-v2 prøver det mot både originals/ og images/ via SEARCH_PATH_TEMPLATES.
+  // _small/_compressed-stripping er en safety net hvis en eldre rad ved et uhell peker på derivat.
   function extractMediaFilenames(mediaObjects: EventImage[]): string[] {
     return mediaObjects.map(media => {
       const url = media.image_url;
-      const match = url.match(/\/images\/(.+)$/);
-      return match ? match[1] : null;
-    }).filter((v): v is string => !!v);
+      if (!url) return null;
+      const noQuery = url.split('?')[0];
+      const lastSegment = noQuery.split('/').pop();
+      if (!lastSegment) return null;
+      return lastSegment
+        .replace(/_small(\.[^.]+)$/, '$1')
+        .replace(/_compressed(\.[^.]+)$/, '$1');
+    }).filter((v): v is string => !!v && v.length > 0);
   }
 
   type ZipStartResult =
