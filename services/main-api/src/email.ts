@@ -1089,3 +1089,52 @@ ${footer}
 
   return await sendEmail(email, subject, text, html);
 }
+
+/**
+ * Admin-notifikasjon ved feature request / bug report.
+ * Recipient styres av FEEDBACK_NOTIFICATION_EMAIL env-var (default: lasse@styretavla.no).
+ */
+export async function sendFeedbackNotificationEmail(opts: {
+  type: 'feature' | 'bug';
+  title: string;
+  description: string;
+  submitterEmail?: string;
+  id: string;
+}): Promise<boolean> {
+  const recipient = (process.env.FEEDBACK_NOTIFICATION_EMAIL || 'lasse@styretavla.no').trim();
+  const typeLabel = opts.type === 'bug' ? 'Bug report' : 'Feature request';
+  const titleTrim = opts.title.length > 120 ? opts.title.slice(0, 117) + '…' : opts.title;
+  const subject = `[Evenero] ${typeLabel}: ${titleTrim}`;
+
+  const text = [
+    `${typeLabel}`,
+    '',
+    `Title: ${opts.title}`,
+    '',
+    'Description:',
+    opts.description,
+    '',
+    `From: ${opts.submitterEmail || '(anonymous)'}`,
+    `Submission ID: ${opts.id}`,
+  ].join('\n');
+
+  const esc = (s: string) => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
+  const badgeColor = opts.type === 'bug' ? '#dc2626' : '#7c3aed';
+  const html = `
+<!DOCTYPE html>
+<html><body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f9fafb;">
+  <div style="max-width:600px;margin:24px auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+    <div style="padding:20px 24px;border-bottom:1px solid #e5e7eb;">
+      <span style="display:inline-block;background:${badgeColor};color:#fff;font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;letter-spacing:0.04em;text-transform:uppercase;">${typeLabel}</span>
+      <h2 style="margin:12px 0 0;font-size:18px;color:#111827;line-height:1.4;">${esc(opts.title)}</h2>
+    </div>
+    <div style="padding:20px 24px;color:#374151;font-size:14px;line-height:1.6;white-space:pre-wrap;">${esc(opts.description)}</div>
+    <div style="padding:14px 24px;background:#f9fafb;color:#6b7280;font-size:12px;border-top:1px solid #e5e7eb;">
+      <div><strong>From:</strong> ${opts.submitterEmail ? esc(opts.submitterEmail) : '<em>(anonymous)</em>'}</div>
+      <div style="margin-top:4px;"><strong>ID:</strong> <code style="font-family:monospace;color:#374151;">${esc(opts.id)}</code></div>
+    </div>
+  </div>
+</body></html>`.trim();
+
+  return await sendEmail(recipient, subject, text, html);
+}

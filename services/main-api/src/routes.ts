@@ -2395,7 +2395,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         description: validatedData.description,
         email: validatedData.email || undefined
       });
-      
+
       // Record submission
       const currentEntry = feedbackRateLimitStore.get(rateLimitKey);
       if (currentEntry && now - currentEntry.firstRequest <= FEEDBACK_RATE_LIMIT_WINDOW_MS) {
@@ -2403,7 +2403,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         feedbackRateLimitStore.set(rateLimitKey, { count: 1, firstRequest: now });
       }
-      
+
+      // Fire-and-forget admin-notification — feedback er allerede lagret i DB
+      // så vi blokkerer ikke responsen på Mailgun-RTT (eller en Mailgun-feil).
+      (async () => {
+        try {
+          const { sendFeedbackNotificationEmail } = await import('./email');
+          await sendFeedbackNotificationEmail({
+            type: validatedData.type as 'feature' | 'bug',
+            title: validatedData.title,
+            description: validatedData.description,
+            submitterEmail: validatedData.email || undefined,
+            id: featureRequest.id,
+          });
+        } catch (err) {
+          console.error('[FEEDBACK] Failed to send admin notification:', err);
+        }
+      })();
+
       res.status(201).json({
         success: true,
         data: { id: featureRequest.id }
