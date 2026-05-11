@@ -110,21 +110,30 @@ app.post('/', async (req, res) => {
     await downloadObjectToFile(event.name, inputPath);
     const downloadMs = Date.now() - t0;
 
-    const result = await processVideo(inputPath, previewPath, posterPath, sourceBytes);
-
-    // Last opp poster ALLTID (det er alltid generert).
-    // Last opp preview KUN hvis encoding lyktes (ikke skipped).
-    // Skriv skipped.json HVIS preview ble hoppet over.
+    // Start poster-upload SÅ SNART poster.jpg er klar (callback fra processVideo),
+    // parallellt med preview-encoding. Galleri-thumbnail er tilgjengelig på
+    // sekunder selv om encode tar minutter.
     const t2 = Date.now();
-    const uploads: Promise<void>[] = [
-      uploadFile(posterPath, posterOutputPath(eventId, mediaId), 'image/jpeg'),
-    ];
+    let posterUploadPromise: Promise<void> = Promise.resolve();
+    const result = await processVideo(
+      inputPath,
+      previewPath,
+      posterPath,
+      sourceBytes,
+      (posterFile) => {
+        posterUploadPromise = uploadFile(
+          posterFile,
+          posterOutputPath(eventId, mediaId),
+          'image/jpeg',
+        );
+      },
+    );
 
-    if (result.previewBytes !== null) {
-      uploads.push(uploadFile(previewPath, previewOutputPath(eventId, mediaId), 'video/mp4'));
-    } else {
-      uploads.push(
-        uploadJson(skippedFlagPath(eventId, mediaId), {
+    // Last opp preview/skipped-flag, vent på alle uploads (inkl. poster som
+    // sannsynligvis er ferdig allerede siden den startet før encode)
+    const previewOrSkipped: Promise<void> = result.previewBytes !== null
+      ? uploadFile(previewPath, previewOutputPath(eventId, mediaId), 'video/mp4')
+      : uploadJson(skippedFlagPath(eventId, mediaId), {
           skipped: true,
           reason: result.strategy,
           sourceBytes,
@@ -134,10 +143,9 @@ app.post('/', async (req, res) => {
           sourceCodec: result.probe.videoCodec,
           objectName: event.name,
           timestamp: new Date().toISOString(),
-        }),
-      );
-    }
-    await Promise.all(uploads);
+        });
+
+    await Promise.all([posterUploadPromise, previewOrSkipped]);
     const uploadMs = Date.now() - t2;
 
     console.log(

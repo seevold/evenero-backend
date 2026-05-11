@@ -108,6 +108,13 @@ export async function processVideo(
   previewPath: string,
   posterPath: string,
   sourceBytes: number,
+  /**
+   * Callback som fyrer SÅ SNART poster.jpg er ferdig generert, men FØR
+   * preview-encoding starter. Lar caller laste opp poster umiddelbart i
+   * parallell med encoding, slik at galleri-thumbnail er tilgjengelig
+   * etter sekunder selv om encode tar minutter.
+   */
+  onPosterReady?: (posterPath: string, posterBytes: number) => void | Promise<void>,
 ): Promise<ProcessResult> {
   const probe = await ffprobe(inputPath);
 
@@ -116,6 +123,12 @@ export async function processVideo(
   await makePoster(inputPath, posterPath);
   const posterMs = Date.now() - posterStart;
   const posterStat = await stat(posterPath);
+
+  // Varsle caller om at poster er klar — de starter upload i parallell
+  // med encoding under
+  if (onPosterReady) {
+    await onPosterReady(posterPath, posterStat.size);
+  }
 
   // Avgjør om preview skal genereres
   const skipReason = shouldSkipPreview(probe, sourceBytes);
