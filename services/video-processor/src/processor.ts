@@ -135,7 +135,20 @@ export async function processVideo(
 
   try {
     if (strategy === 'remux') {
-      await remux(inputPath, previewPath, config.encodeTimeoutMs);
+      try {
+        await remux(inputPath, previewPath, config.encodeTimeoutMs);
+      } catch (remuxErr) {
+        // Remux (-c copy) feiler hvis kildens audio/video-codec ikke kan
+        // pakkes inn i mp4-container uten transkoding. Klassisk eksempel:
+        // gamle .mov-filer med adpcm_ima_wav-audio. Fallback til full
+        // reencode som alltid produserer kompatibel H.264+AAC mp4.
+        const code = (remuxErr as { code?: string }).code;
+        if (code === 'ENCODE_TIMEOUT') throw remuxErr;
+        console.warn('[video-processor] Remux feilet, faller tilbake til reencode:',
+          remuxErr instanceof Error ? remuxErr.message.split('\n')[0] : String(remuxErr));
+        strategy = 'reencode';
+        await reencode(inputPath, previewPath, config.encodeTimeoutMs);
+      }
     } else {
       await reencode(inputPath, previewPath, config.encodeTimeoutMs);
     }
