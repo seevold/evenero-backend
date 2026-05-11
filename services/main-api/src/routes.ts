@@ -2350,7 +2350,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ detail: "Only the event owner or co-hosts can view zip jobs." });
       }
 
-      const jobs = await storage.listZipJobsForEvent(event_id, 10);
+      // zip_jobs.event_id lagres som event.id (UUID), ikke kort-id fra URL.
+      const jobs = await storage.listZipJobsForEvent(event.id, 10);
       res.json({ jobs: jobs.map(serializeZipJob) });
     } catch (error) {
       console.error('Error in /events/:event_id/zip-jobs:', error);
