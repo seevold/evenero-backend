@@ -667,6 +667,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).send("Error: User ID is required");
     }
 
+    // Self-protection: an admin deleting their own user record would
+    // orphan their JWT and lose admin access permanently. Require another
+    // admin to remove this account.
+    if (user_uuid === admin.id) {
+      return res.status(400).json({
+        detail: "You can't delete your own admin account. Ask another admin to do it.",
+      });
+    }
+
     try {
       const deleted = await storage.deleteUser(user_uuid);
       if (!deleted) {
@@ -3108,7 +3117,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { userId } = req.params;
-      
+
       // Validate request body
       const parseResult = adminUpdateUserSchema.safeParse(req.body);
       if (!parseResult.success) {
@@ -3116,6 +3125,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { name, role, active, event_credit } = parseResult.data;
+
+      // Self-protection: prevent an admin from locking themselves out.
+      // The dangerous mutations are demoting your own role to non-superuser
+      // (loses access on next /api/auth) and deactivating your own account
+      // (blocks future logins). Self-name and self-credit changes are fine.
+      if (userId === admin.id) {
+        if (role !== undefined && role !== 'superuser') {
+          return res.status(400).json({
+            detail: "You can't demote your own admin role. Ask another admin to do it.",
+          });
+        }
+        if (active === false) {
+          return res.status(400).json({
+            detail: "You can't deactivate your own account. Ask another admin to do it.",
+          });
+        }
+      }
 
       // Build updates object
       const updates: any = {};
