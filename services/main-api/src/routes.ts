@@ -1820,8 +1820,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let sent = 0;
       let failed = 0;
       
-      // PUBLIC_APP_URL settes per miljø: staging=evenero-app-staging.vercel.app, prod=app.evenero.com
-      const baseUrl = process.env.PUBLIC_APP_URL || "https://app.evenero.com";
+      // PUBLIC_APP_URL settes per miljø: staging=evenero-app-staging.vercel.app,
+      // prod=event.evenero.com (etter Replit→Vercel-cutover). Den gamle
+      // app.evenero.com-prod-URL-en er kun lest av legacy Replit-stacken som
+      // forsvinner ved cutover; her brukes fallback bare hvis env-var ikke er
+      // satt, og den peker mot ny canonical URL.
+      const baseUrl = process.env.PUBLIC_APP_URL || "https://event.evenero.com";
       
       let skipped = 0;
       for (const reminder of pendingReminders) {

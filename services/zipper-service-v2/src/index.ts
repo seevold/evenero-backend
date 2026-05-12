@@ -23,7 +23,7 @@ type ProcessZipBody = ZipRequestBody & {
 
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
-// Public-fasade: app.evenero.com (eller staging-versjon) POSTer hit. Cloud Run
+// Public-fasade: main-api (på vegne av frontend-en) POSTer hit. Cloud Run
 // validerer OIDC automatisk via --no-allow-unauthenticated. Caller må sende
 // Authorization: Bearer <id_token> med audience = denne service-URL-en.
 app.post('/zip', async (req, res) => {

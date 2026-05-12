@@ -37,7 +37,7 @@ const globalLimiter = rateLimit({
 });
 
 // CORS — eksplisitt allowlist via env-var (komma-separert)
-// Eksempel: CORS_ORIGINS="https://app.evenero.com,https://evenero-app-staging.vercel.app"
+// Eksempel: CORS_ORIGINS="https://event.evenero.com,https://evenero-app-staging.vercel.app"
 const corsOrigins = (process.env.CORS_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean);
 app.use(
   cors({
