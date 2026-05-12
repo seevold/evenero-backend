@@ -319,17 +319,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const pinExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
       await storage.updateUserPinCode(email, pinCode, pinExpiry);
 
-      // Send email with PIN code (use user's preferred locale)
+      // Send email with PIN code. Locale priority:
+      // (1) recipient's saved DB pref, (2) `locale` field in request body
+      // from the frontend's active locale, (3) Accept-Language header
+      // (matters for first-time visitors who don't have a user record yet).
       try {
-        const { sendPinCodeEmail } = await import('./email');
-        const userLocale = user?.preferred_locale || 'en';
-        
+        const { sendPinCodeEmail, resolveEmailLocale } = await import('./emails/index.js');
+        const userLocale = resolveEmailLocale(req, user);
+
         // Construct login URL with pre-filled email and PIN
         const protocol = req.protocol;
         const host = req.get('host');
         const loginUrl = `${protocol}://${host}/login/${encodeURIComponent(email)}?pin=${pinCode}`;
-        
-        await sendPinCodeEmail(email, pinCode, userLocale as 'en' | 'nb', loginUrl);
+
+        await sendPinCodeEmail(email, pinCode, userLocale, loginUrl);
       } catch (emailError) {
         console.error('Error sending email:', emailError);
         // Don't fail the request if email sending fails
@@ -1423,10 +1426,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const inviter = await storage.getUserByEmail(userEmail);
       const inviterName = inviter?.name || userEmail;
 
-      // Send invitation email
+      // Send invitation email. Locale picking:
+      //   1. If the invitee already has an Evenero account, use their saved
+      //      preference — they've explicitly chosen this language.
+      //   2. Otherwise use the language the inviter picked in the form
+      //      (passed as `locale` in the request body); they often know which
+      //      language the invitee speaks.
+      //   3. Fall back to the inviter's own preferred locale.
+      //   4. Final fallback: Accept-Language → DEFAULT_LOCALE ('en').
       const eventUrl = `${getBaseUrl(req)}/gallery/${event_id}`;
-      const { sendCoHostInvitationEmail } = await import('./email');
-      await sendCoHostInvitationEmail(email, event.event_name || 'Event', inviterName, eventUrl, 'en');
+      const { sendCoHostInvitationEmail, resolveEmailLocale } = await import('./emails/index.js');
+      const invitee = await storage.getUserByEmail(email);
+      const explicitLocale =
+        (req.body as any)?.locale ||
+        inviter?.preferred_locale ||
+        undefined;
+      const inviteLocale = resolveEmailLocale(req, invitee, explicitLocale);
+      await sendCoHostInvitationEmail(email, event.event_name || 'Event', inviterName, eventUrl, inviteLocale);
 
       res.json({ success: true, message: "Co-host invited successfully" });
     } catch (error) {
@@ -1706,17 +1722,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const scheduledFor = new Date(Date.now() + hoursNum * 60 * 60 * 1000);
       console.log('[REMINDER] Creating new reminder with scheduled_for:', scheduledFor.toISOString());
 
-      // Determine locale from browser language for confirmation email
-      const acceptLang = req.headers['accept-language'] || '';
-      let locale: 'en' | 'nb' | 'sv' | 'es' = 'en';
-      if (acceptLang.startsWith('nb') || acceptLang.startsWith('no')) {
-        locale = 'nb';
-      } else if (acceptLang.startsWith('sv')) {
-        locale = 'sv';
-      } else if (acceptLang.startsWith('es')) {
-        locale = 'es';
-      }
-      console.log('[REMINDER] Detected locale from browser:', locale);
+      // Determine locale: prefer body's `locale` (frontend's active app
+      // locale), fall back to Accept-Language. Stored on the reminder so
+      // the *future* reminder email also goes out in the same language.
+      const { resolveEmailLocale: resolveLocaleForReminder } = await import('./emails/index.js');
+      const reminderUser = await storage.getUserByEmail(email.toLowerCase());
+      const locale = resolveLocaleForReminder(req, reminderUser);
+      console.log('[REMINDER] Resolved locale:', locale);
 
       // Create new reminder with detected locale
       const reminder = await storage.createEventReminder({
@@ -1739,7 +1751,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const event = await storage.getEvent(event_id);
         if (event) {
-          const { sendReminderConfirmationEmail } = await import('./email');
+          const { sendReminderConfirmationEmail } = await import('./emails/index.js');
           const galleryUrl = `${getBaseUrl(req)}/gallery/${event_id}`;
           await sendReminderConfirmationEmail(
             email.toLowerCase(),
@@ -1820,16 +1832,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
             continue;
           }
 
-          const { sendEventReminderEmail } = await import('./email');
+          const { sendEventReminderEmail, resolveEmailLocale: resolveLocaleForReminderSend } = await import('./emails/index.js');
           const galleryUrl = `${baseUrl}/gallery/${reminder.event_id}`;
 
+          // Locale priority: locale captured at reminder signup wins
+          // (it reflects what the visitor was browsing in), then the user's
+          // saved preference if they have an account. This is a cron-style
+          // job so there's no live request — pass undefined for `req`.
           const user = await storage.getUserByEmail(reminder.email);
-          let locale: 'en' | 'nb' | 'sv' | 'es' = 'en';
-          const reminderLocale = (reminder as any).locale;
-          if (reminderLocale === 'nb' || reminderLocale === 'sv' || reminderLocale === 'en' || reminderLocale === 'es') {
-            locale = reminderLocale;
-          } else if (user?.preferred_locale === 'nb' || user?.preferred_locale === 'sv' || user?.preferred_locale === 'en' || user?.preferred_locale === 'es') {
-            locale = user.preferred_locale as 'en' | 'nb' | 'sv' | 'es';
+          const reminderLocale = (reminder as any).locale as string | undefined;
+          let locale = resolveLocaleForReminderSend(undefined, user, reminderLocale);
+          // Fallback for legacy reminders missing both signals.
+          if (!reminderLocale && !user?.preferred_locale) {
+            locale = 'en';
           }
 
           console.log(`[REMINDER] Sending to ${reminder.email} with locale: ${locale}`);
@@ -2182,9 +2197,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (status === 'completed' && zipUrl && userEmail) {
         const normalizedEmail = userEmail.toLowerCase().trim();
         const user = await storage.getUserByEmail(normalizedEmail);
-        const userLocale = (user?.preferred_locale || 'en') as 'en' | 'nb';
-
-        const { sendZipDownloadEmail } = await import('./email');
+        const { sendZipDownloadEmail, resolveEmailLocale: resolveLocaleForZip } = await import('./emails/index.js');
+        const userLocale = resolveLocaleForZip(req, user);
         const result = await sendZipDownloadEmail(
           userEmail,
           eventName || 'your event',
@@ -2408,7 +2422,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // så vi blokkerer ikke responsen på Mailgun-RTT (eller en Mailgun-feil).
       (async () => {
         try {
-          const { sendFeedbackNotificationEmail } = await import('./email');
+          const { sendFeedbackNotificationEmail } = await import('./emails/index.js');
           await sendFeedbackNotificationEmail({
             type: validatedData.type as 'feature' | 'bug',
             title: validatedData.title,

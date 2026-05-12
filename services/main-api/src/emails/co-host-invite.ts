@@ -1,0 +1,49 @@
+import { translateEmail as te } from '../i18n.js';
+import type { SupportedLocale } from './locale.js';
+import { stripEmoji } from './locale.js';
+import { renderEmail, type Block } from './layout.js';
+import { sendEmail } from './send.js';
+
+export async function sendCoHostInvitationEmail(
+  email: string,
+  eventName: string,
+  inviterName: string,
+  eventUrl: string,
+  locale: SupportedLocale,
+): Promise<boolean> {
+  const cleanEventName = stripEmoji(eventName);
+  const subject = te(locale, 'coHostInvite.subject', { eventName: cleanEventName });
+
+  // The permissions list is now properly translated (the old template
+  // hardcoded English in the HTML even though the JSON had translations).
+  // We split the multi-line "permissionsList" value on newlines so each
+  // bullet renders as a list item.
+  const permissionsListRaw = te(locale, 'coHostInvite.permissionsList');
+  const permissionItems = permissionsListRaw
+    .split('\n')
+    .map(line => line.replace(/^[•·\-\*]\s*/, '').trim())
+    .filter(Boolean);
+
+  const blocks: Block[] = [
+    { type: 'eyebrow', text: te(locale, 'coHostInvite.eyebrow') },
+    { type: 'heading', text: te(locale, 'coHostInvite.title') },
+    { type: 'paragraph', text: te(locale, 'coHostInvite.body', { inviterName, eventName: cleanEventName }) },
+    { type: 'divider' },
+    { type: 'subheading', text: cleanEventName },
+    { type: 'paragraph', text: te(locale, 'coHostInvite.description') },
+    { type: 'paragraph', text: te(locale, 'coHostInvite.permissions'), align: 'center' },
+    { type: 'list', items: permissionItems },
+    { type: 'button', label: te(locale, 'coHostInvite.acceptButton'), href: eventUrl },
+    { type: 'small', text: te(locale, 'coHostInvite.dashboardNote') },
+    { type: 'spacer', size: 'sm' },
+    { type: 'small', text: te(locale, 'coHostInvite.ignore') },
+  ];
+
+  const { html, text } = renderEmail({
+    lang: locale,
+    footer: te(locale, 'common.footer'),
+    blocks,
+  });
+
+  return sendEmail(email, subject, text, html);
+}

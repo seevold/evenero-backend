@@ -2,66 +2,72 @@
   "common": {
     "greeting": "Hej {{name}}",
     "greetingNoName": "Hej",
-    "footer": "Med vänliga hälsningar,\nEvenero-teamet",
-    "unsubscribe": "Avsluta prenumeration på dessa e-postmeddelanden",
+    "footer": "Med vänliga hälsningar\nEvenero-teamet",
+    "unsubscribe": "Avregistrera dig från dessa e-postmeddelanden",
     "viewOnline": "Visa i webbläsare"
   },
   "pinCode": {
-    "subject": "Din Evenero-inloggningskod",
+    "subject": "Din inloggningskod för Evenero",
+    "eyebrow": "Verifieringskod",
     "title": "Din inloggningskod",
-    "body": "Använd denna kod för att logga in på Evenero:",
-    "code": "{{code}}",
-    "expiry": "Denna kod går ut om 10 minuter.",
-    "ignore": "Om du inte begärde denna kod kan du ignorera detta e-postmeddelande."
+    "body": "Använd koden nedan för att logga in på Evenero.",
+    "loginButton": "Logga in med ett klick",
+    "orEnterManually": "Eller ange koden manuellt",
+    "expiry": "Koden är giltig i 10 minuter.",
+    "ignore": "Om du inte begärde denna kod kan du tryggt ignorera detta meddelande."
   },
   "coHostInvite": {
-    "subject": "🎉 Du är inbjuden som medvärd för {{eventName}}!",
-    "title": "Du är medvärd!",
-    "body": "{{inviterName}} har bjudit in dig att hjälpa till med att hantera sitt evenemang på Evenero.",
-    "whatIsEvenero": "Evenero är en plattform för delning av foton och videor som hjälper till att samla minnen från bröllop, fester och speciella tillfällen. Gäster kan ladda upp sina foton, och alla kan njuta av ett gemensamt galleri med de bästa ögonblicken.",
-    "description": "Som medvärd kan du hantera evenemanget, se alla uppladdningar, moderera innehåll och ladda ner hela fotosamlingen. Din hjälp är värdefull!",
-    "permissions": "Vad du kan göra som medvärd:",
-    "permissionsList": "• Visa och ladda ner alla foton och videor\n• Godkänna eller ta bort uppladdningar\n• Få tillgång till evenemangsinställningar\n• Se live-bildspelet",
-    "acceptButton": "Visa evenemangets galleri",
-    "dashboardNote": "Efter inloggning hittar du evenemanget på din instrumentpanel.",
-    "ignore": "Om du inte känner igen avsändaren kan du ignorera detta e-postmeddelande."
+    "subject": "Inbjudan: medvärd för {{eventName}}",
+    "eyebrow": "Inbjudan",
+    "title": "Du är inbjuden som medvärd",
+    "body": "{{inviterName}} vill ha dig med i teamet för {{eventName}}.",
+    "description": "Som medvärd kan du vara med och administrera evenemanget och samlingen av bilder och videor.",
+    "permissions": "Som medvärd kan du:",
+    "permissionsList": "Se och ladda ner alla bilder och videor\nGodkänna eller ta bort uppladdningar\nÄndra evenemangsinställningar\nVisa bildspelet live",
+    "acceptButton": "Öppna galleriet",
+    "dashboardNote": "Efter inloggning hittar du evenemanget på din översikt.",
+    "ignore": "Känner du inte igen avsändaren? Du kan tryggt ignorera detta meddelande."
   },
   "eventReminder": {
-    "subject": "📸 Dags att dela dina foton från {{eventName}}!",
-    "title": "Redo att dela dina minnen?",
-    "body": "Du satte en påminnelse om att ladda upp och se foton från \"{{eventName}}\". Galleriet är live och väntar på dina foton!",
-    "uploadPrompt": "Dela dina foton och videor från evenemanget - hjälp till att skapa en komplett minnessamling som alla kan njuta av.",
-    "viewOthers": "Se vad andra redan har delat i galleriet och upptäck ögonblick du kanske missade!",
-    "viewGallery": "Visa & ladda upp foton",
+    "subject": "Dela dina bilder från {{eventName}}",
+    "eyebrow": "Påminnelse",
+    "title": "Redo att dela minnena?",
+    "body": "Du satte en påminnelse om att ladda upp bilder från {{eventName}}. Galleriet väntar.",
+    "uploadPrompt": "Bidra med dina bilder och videor så att alla kan återuppleva kvällen.",
+    "viewOthers": "Se vad andra redan har delat — kanske upptäcker du ögonblick du missade.",
+    "viewGallery": "Öppna galleriet",
     "galleryLink": "Gallerilänk:",
-    "downloadHint": "Du kan ladda ner foton ett i taget från galleriet."
+    "downloadHint": "Du kan också ladda ner bilder från galleriet."
   },
   "reminderConfirmation": {
     "subject": "Påminnelse inställd för {{eventName}}",
-    "title": "Påminnelse bekräftad!",
-    "body": "Vi skickar dig en påminnelse med gallerilänken för \"{{eventName}}\".",
-    "scheduledFor": "Du får din påminnelse den {{date}}.",
+    "eyebrow": "Bekräftat",
+    "title": "Din påminnelse är inställd",
+    "body": "Vi skickar en påminnelse med länken till galleriet för {{eventName}}.",
+    "scheduledFor": "Du får påminnelsen {{date}}.",
     "galleryLink": "Under tiden kan du se galleriet här:",
-    "viewGalleryButton": "Visa galleri",
-    "changeReminder": "Ändrat dig? Ignorera bara påminnelsemailet när det kommer."
+    "viewGalleryButton": "Öppna galleriet",
+    "changeReminder": "Ändrat dig? Ignorera bara påminnelsen när den kommer."
   },
   "zipReady": {
-    "subject": "Din fotonedladdning är klar",
-    "title": "Din nedladdning är klar",
-    "body": "Din fotosamling från \"{{eventName}}\" har packats och är klar för nedladdning.",
-    "downloadButton": "Ladda ner foton",
-    "expiry": "Denna nedladdningslänk går ut om 24 timmar.",
-    "size": "Total storlek: {{size}}"
+    "subject": "Din bildnedladdning är klar",
+    "eyebrow": "Klar för nedladdning",
+    "title": "Nedladdningen är klar",
+    "body": "Din bildsamling från {{eventName}} är paketerad och klar.",
+    "fileCountLabel": "bilder & videor",
+    "sizeLabel": "total storlek",
+    "downloadButton": "Ladda ner nu",
+    "expiry": "Länken är giltig i 7 dagar."
   },
   "welcome": {
-    "subject": "Välkommen till Evenero!",
-    "title": "Välkommen till Evenero",
-    "body": "Tack för att du gick med i Evenero! Vi ser fram emot att hjälpa dig samla och dela minnen från dina evenemang.",
+    "subject": "Välkommen till Evenero",
+    "title": "Välkommen",
+    "body": "Tack för att du gick med i Evenero. Vi ser fram emot att hjälpa dig samla och dela minnen.",
     "getStarted": "Kom igång",
     "features": {
       "title": "Vad du kan göra:",
       "create": "Skapa evenemang för bröllop, fester och mer",
-      "collect": "Samla foton från alla dina gäster",
+      "collect": "Samla bilder från alla dina gäster",
       "share": "Dela vackra gallerier med alla"
     }
   }
