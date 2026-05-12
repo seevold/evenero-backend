@@ -13,19 +13,23 @@ export async function sendEventReminderEmail(
   const cleanEventName = stripEmoji(eventName);
   const subject = te(locale, 'eventReminder.subject', { eventName: cleanEventName });
 
+  // Order: lead-in copy → CTA → secondary supporting note.
+  // Old layout had a paragraph *after* the button which buried the
+  // hint and made the CTA feel mid-message instead of the climax.
   const blocks: Block[] = [
     { type: 'eyebrow', text: te(locale, 'eventReminder.eyebrow') },
     { type: 'heading', text: te(locale, 'eventReminder.title') },
     { type: 'subheading', text: cleanEventName },
     { type: 'paragraph', text: te(locale, 'eventReminder.body', { eventName: cleanEventName }) },
     { type: 'paragraph', text: te(locale, 'eventReminder.uploadPrompt') },
-    { type: 'button', label: te(locale, 'eventReminder.viewGallery'), href: galleryUrl },
     { type: 'paragraph', text: te(locale, 'eventReminder.viewOthers') },
+    { type: 'button', label: te(locale, 'eventReminder.viewGallery'), href: galleryUrl },
     { type: 'small', text: te(locale, 'eventReminder.downloadHint') },
   ];
 
   const { html, text } = renderEmail({
     lang: locale,
+    preheader: te(locale, 'eventReminder.preheader', { eventName: cleanEventName }),
     footer: te(locale, 'common.footer'),
     blocks,
   });

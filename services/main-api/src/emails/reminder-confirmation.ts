@@ -27,6 +27,7 @@ export async function sendReminderConfirmationEmail(
 
   const { html, text } = renderEmail({
     lang: locale,
+    preheader: te(locale, 'reminderConfirmation.preheader', { date: formattedDate, eventName: cleanEventName }),
     footer: te(locale, 'common.footer'),
     blocks,
   });

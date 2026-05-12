@@ -34,11 +34,21 @@ function applyStagingWhitelist(to: string): { actualTo: string; isRerouted: bool
   return { actualTo: to, isRerouted: false };
 }
 
+export interface SendEmailOptions {
+  /**
+   * Address replies should go to. For invitations, set this to the
+   * inviter's address so the recipient can reply directly. Omit for
+   * verification codes / system notifications.
+   */
+  replyTo?: string;
+}
+
 export async function sendEmail(
   to: string,
   subject: string,
   text?: string,
   html?: string,
+  opts: SendEmailOptions = {},
 ): Promise<boolean> {
   const { actualTo, isRerouted } = applyStagingWhitelist(to);
   const finalSubject = isRerouted ? `[STAGING→${to}] ${subject}` : subject;
@@ -47,6 +57,7 @@ export async function sendEmail(
     console.warn('[EMAIL] MAILGUN_API_KEY not set — logging instead of sending');
     console.log(`[EMAIL] To: ${actualTo}${isRerouted ? ` (rerouted from ${to})` : ''}`);
     console.log(`[EMAIL] Subject: ${finalSubject}`);
+    if (opts.replyTo) console.log(`[EMAIL] Reply-To: ${opts.replyTo}`);
     if (text) console.log(`[EMAIL] Text: ${text.substring(0, 200)}…`);
     return true;
   }
@@ -59,6 +70,7 @@ export async function sendEmail(
     if (text) form.append('text', text);
     if (html) form.append('html', html);
     if (isRerouted) form.append('h:X-Original-To', to);
+    if (opts.replyTo) form.append('h:Reply-To', opts.replyTo);
 
     const url = `${mailgunConfig.baseUrl}/${mailgunConfig.domain}/messages`;
     const auth = Buffer.from(`api:${mailgunConfig.apiKey}`).toString('base64');

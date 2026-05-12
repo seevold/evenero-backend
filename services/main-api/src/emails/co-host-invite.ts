@@ -10,6 +10,8 @@ export async function sendCoHostInvitationEmail(
   inviterName: string,
   eventUrl: string,
   locale: SupportedLocale,
+  /** Inviter's email — used as Reply-To so the recipient can ask them about it. */
+  inviterEmail?: string,
 ): Promise<boolean> {
   const cleanEventName = stripEmoji(eventName);
   const subject = te(locale, 'coHostInvite.subject', { eventName: cleanEventName });
@@ -41,9 +43,12 @@ export async function sendCoHostInvitationEmail(
 
   const { html, text } = renderEmail({
     lang: locale,
+    preheader: te(locale, 'coHostInvite.preheader', { inviterName, eventName: cleanEventName }),
     footer: te(locale, 'common.footer'),
     blocks,
   });
 
-  return sendEmail(email, subject, text, html);
+  // Reply-To points at the inviter — recipient can reply to ask
+  // "is this you?" directly instead of bouncing off noreply@.
+  return sendEmail(email, subject, text, html, { replyTo: inviterEmail });
 }

@@ -21,9 +21,14 @@ export async function sendZipDownloadEmail(
     { type: 'eyebrow', text: te(locale, 'zipReady.eyebrow') },
     { type: 'heading', text: te(locale, 'zipReady.title') },
     { type: 'paragraph', text: te(locale, 'zipReady.body', { eventName: cleanEventName }) },
+    // Two-cell stats panel reads better than a single "X · Y MB" string;
+    // the labels are localized and uppercase-tracked to match the eyebrow style.
     {
-      type: 'note',
-      text: `${fileCount} ${fileCountLabel}  ·  ${zipSizeMB} MB ${sizeLabel}`,
+      type: 'stats',
+      items: [
+        { value: String(fileCount), label: fileCountLabel },
+        { value: `${zipSizeMB} MB`, label: sizeLabel },
+      ],
     },
     { type: 'button', label: te(locale, 'zipReady.downloadButton'), href: zipUrl },
     { type: 'note', tone: 'warning', text: te(locale, 'zipReady.expiry') },
@@ -31,6 +36,7 @@ export async function sendZipDownloadEmail(
 
   const { html, text } = renderEmail({
     lang: locale,
+    preheader: te(locale, 'zipReady.preheader', { eventName: cleanEventName, count: String(fileCount), size: String(zipSizeMB) }),
     footer: te(locale, 'common.footer'),
     blocks,
   });

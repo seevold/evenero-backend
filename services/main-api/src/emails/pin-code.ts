@@ -19,8 +19,8 @@ export async function sendPinCodeEmail(
   ];
 
   if (loginUrl) {
-    blocks.push({ type: 'button', label: te(locale, 'pinCode.loginButton'), href: loginUrl });
     blocks.push({ type: 'small', text: te(locale, 'pinCode.orEnterManually') });
+    blocks.push({ type: 'button', label: te(locale, 'pinCode.loginButton'), href: loginUrl });
   }
 
   blocks.push({ type: 'divider' });
@@ -29,6 +29,9 @@ export async function sendPinCodeEmail(
 
   const { html, text } = renderEmail({
     lang: locale,
+    // Preheader: the code itself is recognizable to the user since they
+    // just requested it — keeps the inbox preview short and clear.
+    preheader: te(locale, 'pinCode.preheader', { code: pinCode }),
     footer: te(locale, 'common.footer'),
     blocks,
   });

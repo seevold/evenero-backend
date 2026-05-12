@@ -1442,7 +1442,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         inviter?.preferred_locale ||
         undefined;
       const inviteLocale = resolveEmailLocale(req, invitee, explicitLocale);
-      await sendCoHostInvitationEmail(email, event.event_name || 'Event', inviterName, eventUrl, inviteLocale);
+      // Reply-To = inviter's address so the recipient can ask them
+      // directly if the invitation feels unexpected. Falls back to undefined
+      // (= no Reply-To, replies go to noreply@ and bounce).
+      const inviterReplyTo = userEmail && userEmail.includes('@') ? userEmail : undefined;
+      await sendCoHostInvitationEmail(
+        email,
+        event.event_name || 'Event',
+        inviterName,
+        eventUrl,
+        inviteLocale,
+        inviterReplyTo,
+      );
 
       res.json({ success: true, message: "Co-host invited successfully" });
     } catch (error) {
