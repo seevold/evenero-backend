@@ -25,7 +25,7 @@
     "body": "{{inviterName}} would like you to help host {{eventName}}.",
     "description": "As a co-host, you'll help manage the event and the photo & video collection.",
     "permissions": "As a co-host, you can:",
-    "permissionsList": "View and download all photos and videos\nApprove or remove uploads\nChange event settings\nWatch the live slideshow",
+    "permissionsList": "Approve or remove uploads\nChange event settings\nDownload the full photo collection\nStart the slideshow on a big screen",
     "acceptButton": "Open the gallery",
     "dashboardNote": "After signing in, you'll find this event on your dashboard.",
     "ignore": "Don't recognize the sender? You can safely ignore this email."

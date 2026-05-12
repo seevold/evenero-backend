@@ -25,7 +25,7 @@
     "body": "{{inviterName}} vill ha dig med i teamet för {{eventName}}.",
     "description": "Som medvärd hjälper du till att administrera evenemanget och samlingen av bilder och videor.",
     "permissions": "Som medvärd kan du:",
-    "permissionsList": "Se och ladda ner alla bilder och videor\nGodkänna eller ta bort uppladdningar\nÄndra evenemangsinställningar\nSe bildspelet live",
+    "permissionsList": "Godkänna eller ta bort uppladdningar\nÄndra evenemangsinställningar\nLadda ner hela bildsamlingen\nStarta bildspelet på storskärm",
     "acceptButton": "Öppna galleriet",
     "dashboardNote": "Efter inloggning hittar du evenemanget på din översikt.",
     "ignore": "Känner du inte igen avsändaren? Du kan tryggt ignorera detta meddelande."

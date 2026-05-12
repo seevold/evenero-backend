@@ -25,7 +25,7 @@
     "body": "{{inviterName}} quiere que ayudes a organizar {{eventName}}.",
     "description": "Como coanfitrión, ayudarás a gestionar el evento y la colección de fotos y videos.",
     "permissions": "Como coanfitrión podrás:",
-    "permissionsList": "Ver y descargar todas las fotos y videos\nAprobar o eliminar subidas\nCambiar la configuración del evento\nVer la presentación en vivo",
+    "permissionsList": "Aprobar o eliminar subidas\nCambiar la configuración del evento\nDescargar toda la colección de fotos\nIniciar la presentación en pantalla grande",
     "acceptButton": "Abrir la galería",
     "dashboardNote": "Después de iniciar sesión, encontrarás el evento en tu panel.",
     "ignore": "¿No reconoces al remitente? Puedes ignorar este correo."
