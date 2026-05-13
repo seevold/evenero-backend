@@ -22,10 +22,12 @@ function getMailgunConfig() {
 
 const mailgunConfig = getMailgunConfig();
 
-// Staging safety net: when EMAIL_WHITELIST_TO is set, every outbound email
-// is rerouted to that single address with an X-Original-To header preserving
-// the original recipient. Prevents accidentally spamming real customers
-// from staging.
+// Staging/prod-test safety net: when EMAIL_WHITELIST_TO is set, every outbound
+// email rutes til den adressen i stedet for ekte mottaker. X-Original-To-header
+// bevarer opprinnelig mottaker. Subject-linjen forblir uendret slik at e-posten
+// ser identisk ut med hva en kunde vil motta — viktig for UX-verifisering.
+// Sporbarhet via Cloud Run-logs + X-Original-To når man vil se hvor mailen
+// "egentlig" skulle.
 function applyStagingWhitelist(to: string): { actualTo: string; isRerouted: boolean } {
   const whitelist = process.env.EMAIL_WHITELIST_TO;
   if (whitelist && whitelist.trim() !== '') {
@@ -51,12 +53,11 @@ export async function sendEmail(
   opts: SendEmailOptions = {},
 ): Promise<boolean> {
   const { actualTo, isRerouted } = applyStagingWhitelist(to);
-  const finalSubject = isRerouted ? `[STAGING→${to}] ${subject}` : subject;
 
   if (!mailgunConfig.apiKey) {
     console.warn('[EMAIL] MAILGUN_API_KEY not set — logging instead of sending');
     console.log(`[EMAIL] To: ${actualTo}${isRerouted ? ` (rerouted from ${to})` : ''}`);
-    console.log(`[EMAIL] Subject: ${finalSubject}`);
+    console.log(`[EMAIL] Subject: ${subject}`);
     if (opts.replyTo) console.log(`[EMAIL] Reply-To: ${opts.replyTo}`);
     if (text) console.log(`[EMAIL] Text: ${text.substring(0, 200)}…`);
     return true;
@@ -66,7 +67,7 @@ export async function sendEmail(
     const form = new URLSearchParams();
     form.append('from', mailgunConfig.from);
     form.append('to', actualTo);
-    form.append('subject', finalSubject);
+    form.append('subject', subject);
     if (text) form.append('text', text);
     if (html) form.append('html', html);
     if (isRerouted) form.append('h:X-Original-To', to);
