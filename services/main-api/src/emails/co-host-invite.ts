@@ -8,7 +8,10 @@ export async function sendCoHostInvitationEmail(
   email: string,
   eventName: string,
   inviterName: string,
-  eventUrl: string,
+  /** Primær-CTA: login-URL med redirect til manage-siden. */
+  loginUrl: string,
+  /** Sekundær (mindre) lenke: direkte til galleriet uten innlogging. */
+  galleryUrl: string,
   locale: SupportedLocale,
   /** Inviter's email — used as Reply-To so the recipient can ask them about it. */
   inviterEmail?: string,
@@ -35,7 +38,9 @@ export async function sendCoHostInvitationEmail(
     { type: 'paragraph', text: te(locale, 'coHostInvite.description') },
     { type: 'paragraph', text: te(locale, 'coHostInvite.permissions'), align: 'center' },
     { type: 'list', items: permissionItems },
-    { type: 'button', label: te(locale, 'coHostInvite.acceptButton'), href: eventUrl },
+    { type: 'button', label: te(locale, 'coHostInvite.acceptButton'), href: loginUrl },
+    // Sekundær (mindre) lenke — klikkbar small-tekst rett under primær-CTA.
+    { type: 'linkText', label: te(locale, 'coHostInvite.viewGalleryLink'), href: galleryUrl },
     { type: 'small', text: te(locale, 'coHostInvite.dashboardNote') },
     { type: 'spacer', size: 'sm' },
     { type: 'small', text: te(locale, 'coHostInvite.ignore') },

@@ -26,7 +26,8 @@
     "description": "Som medvert kan du være med på å administrere arrangementet og samlingen av bilder og videoer.",
     "permissions": "Som medvert kan du:",
     "permissionsList": "Godkjenne eller fjerne opplastinger\nEndre arrangementsinnstillinger\nLaste ned hele bildesamlingen\nStarte lysbildefremvisning på storskjerm",
-    "acceptButton": "Åpne galleriet",
+    "acceptButton": "Logg inn for å administrere",
+    "viewGalleryLink": "Eller åpne galleriet uten å logge inn",
     "dashboardNote": "Etter innlogging finner du arrangementet på dashbordet ditt.",
     "ignore": "Kjenner du ikke avsenderen? Bare se bort fra denne e-posten."
   },

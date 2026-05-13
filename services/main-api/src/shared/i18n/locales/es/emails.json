@@ -26,7 +26,8 @@
     "description": "Como coanfitrión, ayudarás a gestionar el evento y la colección de fotos y videos.",
     "permissions": "Como coanfitrión podrás:",
     "permissionsList": "Aprobar o eliminar subidas\nCambiar la configuración del evento\nDescargar toda la colección de fotos\nIniciar la presentación en pantalla grande",
-    "acceptButton": "Abrir la galería",
+    "acceptButton": "Inicia sesión para administrar",
+    "viewGalleryLink": "O abre la galería sin iniciar sesión",
     "dashboardNote": "Después de iniciar sesión, encontrarás el evento en tu panel.",
     "ignore": "¿No reconoces al remitente? Puedes ignorar este correo."
   },

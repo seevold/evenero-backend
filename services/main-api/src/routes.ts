@@ -794,7 +794,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ detail: "Event not found" });
       }
 
-      res.json(event);
+      // Sikkerhet: PIN-koden (event_secret) er sensitiv — kun synlig for
+      // owner/cohost. Galleri-besøkende får null tilbake. Beskytter mot at
+      // hvem som helst leser PIN fra /events/{id}-responsen.
+      const token = getTokenFromHeader(req);
+      let role: 'owner' | 'cohost' | 'guest' | 'none' = 'none';
+      if (token) {
+        const email = await verifyToken(token);
+        if (email) role = await storage.getUserRoleForEvent(email, event);
+      }
+      const safe = role === 'owner' || role === 'cohost'
+        ? event
+        : { ...event, event_secret: null };
+
+      res.json(safe);
     } catch (error) {
       res.status(500).send(`Error: ${(error as Error).message}`);
     }
@@ -1483,7 +1496,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       //      language the invitee speaks.
       //   3. Fall back to the inviter's own preferred locale.
       //   4. Final fallback: Accept-Language → DEFAULT_LOCALE ('en').
-      const eventUrl = `${getBaseUrl(req)}/gallery/${event_id}`;
+      // Primær-CTA peker på login med redirect tilbake til manage-siden, slik
+      // at cohost-en lander på admin-UI-et etter PIN-auth. Sekundær (mindre)
+      // lenke peker direkte på galleriet for "ta en kjapp titt"-flyten.
+      const galleryUrl = `${getBaseUrl(req)}/gallery/${event_id}`;
+      const loginUrl = `${getBaseUrl(req)}/login/${encodeURIComponent(email)}?redirect=${encodeURIComponent(`/manage/${event_id}`)}`;
       const { sendCoHostInvitationEmail, resolveEmailLocale } = await import('./emails/index.js');
       const invitee = await storage.getUserByEmail(email);
       const explicitLocale =
@@ -1499,7 +1516,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         email,
         event.event_name || 'Event',
         inviterName,
-        eventUrl,
+        loginUrl,
+        galleryUrl,
         inviteLocale,
         inviterReplyTo,
       );
@@ -1538,14 +1556,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ detail: "Event not found" });
       }
 
-      // Only owner can remove co-hosts
-      if (event.event_owner?.toLowerCase() !== userEmail.toLowerCase()) {
-        return res.status(403).json({ detail: "Only the event owner can remove co-hosts" });
+      // Tillatt: (a) owner fjerner hvem som helst, (b) en cohost fjerner SEG SELV.
+      // Tidligere returnerte alle ikke-owner-kall 403 — selv når cohost-en prøvde
+      // å forlate. Frontend trodde da operasjonen lyktes pga manglende success-
+      // sjekk → bruger fikk "fjernet"-toast men beholdt tilgang.
+      const requesterIsOwner = event.event_owner?.toLowerCase() === userEmail.toLowerCase();
+      const requesterIsSelf = userEmail.toLowerCase() === cohost_email.toLowerCase();
+      if (!requesterIsOwner && !requesterIsSelf) {
+        return res.status(403).json({ detail: "Only the event owner can remove other co-hosts" });
       }
 
       // Get current co-hosts
       const currentCoHosts = event.event_co_host ? event.event_co_host.split(',').map(h => h.trim().toLowerCase()) : [];
-      
+
+      // Verifiser at cohost faktisk er i lista (idempotent fra et brukerperspektiv,
+      // men returner 404 hvis ikke for å unngå tystende no-op).
+      if (!currentCoHosts.includes(cohost_email.toLowerCase())) {
+        return res.status(404).json({ detail: "Co-host not found on this event" });
+      }
+
       // Remove the co-host
       const newCoHosts = currentCoHosts.filter(h => h !== cohost_email.toLowerCase()).join(',');
       await storage.updateEvent(event_id, { event_co_host: newCoHosts || null });

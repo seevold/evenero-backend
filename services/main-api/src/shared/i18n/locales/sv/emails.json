@@ -26,7 +26,8 @@
     "description": "Som medvärd hjälper du till att administrera evenemanget och samlingen av bilder och videor.",
     "permissions": "Som medvärd kan du:",
     "permissionsList": "Godkänna eller ta bort uppladdningar\nÄndra evenemangsinställningar\nLadda ner hela bildsamlingen\nStarta bildspelet på storskärm",
-    "acceptButton": "Öppna galleriet",
+    "acceptButton": "Logga in för att administrera",
+    "viewGalleryLink": "Eller öppna galleriet utan att logga in",
     "dashboardNote": "Efter inloggning hittar du evenemanget på din översikt.",
     "ignore": "Känner du inte igen avsändaren? Du kan tryggt ignorera detta meddelande."
   },
