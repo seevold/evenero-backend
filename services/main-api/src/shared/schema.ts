@@ -65,12 +65,37 @@ export const events = pgTable("events", {
   // Soft-delete: settes når bruker sletter event. NULL = aktivt.
   // Bevarer all relatert data (event_images, likes etc.) for stats + retention.
   // Hard-delete skjer via separat admin-prosess med 30+ dagers karantene.
-  deleted_at: timestamp("deleted_at")
+  deleted_at: timestamp("deleted_at"),
+  // Payment-link: hvilken betaling fundet dette eventet (kreves for refund-deaktivering)
+  created_from_payment_id: integer("created_from_payment_id"),
+  // Grunn for evt deaktivering: 'refund' | 'admin' | NULL
+  deactivated_reason: text("deactivated_reason")
 }, (table) => ({
   eventIdIdx: index("idx_event_id").on(table.event_id),
   eventOwnerIdx: index("idx_event_owner").on(table.event_owner),
   deletedAtIdx: index("idx_events_deleted_at").on(table.deleted_at)
 }));
+
+// Payments — eid av web-api men leses/oppdateres av main-api ved event-aktivering.
+// Schema-en holdes konservativt i synk; web-api har full kopi i sin shared/schema.
+export const payments = pgTable("payments", {
+  id: integer("id").primaryKey().notNull(),
+  payment_intent_id: text("payment_intent_id").notNull().unique(),
+  stripe_charge_id: text("stripe_charge_id"),
+  customer_email: text("customer_email").notNull(),
+  amount: integer("amount").notNull(),
+  currency: text("currency").notNull(),
+  status: text("status").notNull(),
+  product_type: text("product_type").notNull().default("event_credit"),
+  credits_granted: integer("credits_granted").notNull().default(1),
+  user_id: uuid("user_id"),
+  consumed_event_id: uuid("consumed_event_id"),
+  refunded_at: timestamp("refunded_at"),
+  refund_amount: integer("refund_amount"),
+  disputed_at: timestamp("disputed_at"),
+  created_at: timestamp("created_at").defaultNow().notNull(),
+  updated_at: timestamp("updated_at").defaultNow().notNull()
+});
 
 // Moderation status enum values
 export const MODERATION_STATUS = ['pending', 'approved', 'rejected'] as const;

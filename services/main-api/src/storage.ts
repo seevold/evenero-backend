@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { pool } from "./db";
-import { users, events, event_images, event_reminders, event_guest_participants, feature_requests, event_image_likes, qr_template_downloads, zip_jobs } from "@shared/schema";
+import { users, events, event_images, event_reminders, event_guest_participants, feature_requests, event_image_likes, qr_template_downloads, zip_jobs, payments } from "@shared/schema";
 import { eq, and, or, sql, desc, isNull, lte, gte, inArray } from "drizzle-orm";
 import type { User, InsertUser, Event, InsertEvent, EventImage, InsertEventImage, EventReminder, InsertEventReminder, EventGuestParticipant, InsertEventGuestParticipant, FeatureRequest, InsertFeatureRequest, EventImageLike, InsertEventImageLike, QrTemplateDownload, InsertQrTemplateDownload, ZipJob, InsertZipJob } from "@shared/schema";
 import { randomUUID } from "crypto";
@@ -1560,6 +1560,31 @@ export class PostgreSQLStorage implements IStorage {
       .where(eq(zip_jobs.job_id, jobId))
       .returning();
     return updated;
+  }
+
+  /**
+   * FIFO: konsumér eldste ubrukte payment for user.
+   * Atomic UPDATE — ingen race condition selv om bruker oppretter to events samtidig.
+   * Returnerer den konsumerte payment-raden, eller undefined hvis ingen ledig.
+   * Brukes ved event-aktivering for å linke payment til event (refund-deaktivering trenger linken).
+   */
+  async consumeOldestPaymentForUser(userId: string, eventId: string): Promise<{ id: number } | undefined> {
+    const result = await db.execute(sql`
+      UPDATE payments
+      SET consumed_event_id = ${eventId}::uuid, updated_at = now()
+      WHERE id = (
+        SELECT id FROM payments
+        WHERE user_id = ${userId}::uuid
+          AND consumed_event_id IS NULL
+          AND refunded_at IS NULL
+        ORDER BY created_at ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING id
+    `);
+    const rows = (result as any).rows ?? result;
+    return rows[0] as { id: number } | undefined;
   }
 }
 

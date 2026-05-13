@@ -113,6 +113,171 @@ function getSymbol(currency: string): string {
   return CURRENCY_SYMBOLS[currency] || currency.toUpperCase();
 }
 
+// ============================================================================
+// Stripe webhook handlers — én funksjon per event-type for lesbarhet
+// ============================================================================
+
+interface ProductMeta {
+  productType: string;       // 'event_credit' i dag, utvidbart
+  creditsGranted: number;    // hvor mange credits dette kjøpet gir
+}
+
+/**
+ * Les Stripe product-metadata for å avgjøre hva som skal gis.
+ * Ny produkter introduseres ved å sette metadata på Stripe Product:
+ *   internal_type=event_credit     (eller premium_feature, storage_addon, ...)
+ *   credits_granted=1              (eller 5, 10, ...)
+ * Fallback hvis metadata mangler: dagens produkt = 1 event credit.
+ */
+async function readProductMetaFromSession(session: any): Promise<ProductMeta> {
+  try {
+    // Hent line items med expand for å få product-info
+    const lineItems = await stripe.checkout.sessions.listLineItems(session.id, {
+      expand: ['data.price.product'],
+      limit: 1, // single-product i dag; utvides senere
+    });
+    const product = lineItems.data[0]?.price?.product as any;
+    if (product?.metadata) {
+      const productType = product.metadata.internal_type || 'event_credit';
+      const creditsGranted = parseInt(product.metadata.credits_granted ?? '1', 10);
+      if (!Number.isFinite(creditsGranted) || creditsGranted < 0) {
+        console.warn(`[webhook] product ${product.id} har ugyldig credits_granted='${product.metadata.credits_granted}', fallback til 1`);
+        return { productType, creditsGranted: 1 };
+      }
+      return { productType, creditsGranted };
+    }
+    console.warn(`[webhook] mangler product-metadata for session ${session.id}, faller tilbake til event_credit/1`);
+  } catch (err: any) {
+    console.warn(`[webhook] kunne ikke lese product-metadata for session ${session.id}: ${err.message} — fallback til event_credit/1`);
+  }
+  return { productType: 'event_credit', creditsGranted: 1 };
+}
+
+async function handleCheckoutSessionCompleted(session: any): Promise<void> {
+  console.log(`[webhook] checkout.session.completed: ${session.id} email=${session.customer_details?.email}`);
+
+  if (!session.payment_intent || typeof session.payment_intent !== 'string') {
+    console.log(`[webhook] no payment_intent in session ${session.id}, skipping`);
+    return;
+  }
+
+  // Idempotency-vakt
+  const existing = await storage.getPaymentByIntentId(session.payment_intent);
+  if (existing) {
+    console.log(`[webhook] payment ${session.payment_intent} allerede prosessert (id=${existing.id})`);
+    return;
+  }
+
+  const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent);
+
+  let receiptUrl: string | null = null;
+  let stripeChargeId: string | null = null;
+  if (paymentIntent.latest_charge && typeof paymentIntent.latest_charge === 'string') {
+    const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
+    receiptUrl = charge.receipt_url;
+    stripeChargeId = charge.id;
+  }
+
+  const email = session.customer_details?.email || 'unknown@email.com';
+  const meta = await readProductMetaFromSession(session);
+
+  // 1. Krediter user (atomic upsert)
+  let userId: string | null = null;
+  if (email !== 'unknown@email.com' && meta.creditsGranted > 0) {
+    try {
+      const user = await storage.upsertUserAndCreditByEmail(email, meta.creditsGranted);
+      userId = user.id;
+      console.log(`[webhook] credited ${email} +${meta.creditsGranted} (user.id=${user.id}, new event_credit=${user.event_credit})`);
+    } catch (err: any) {
+      console.error(`[webhook] failed to credit ${email}:`, err);
+      // Fortsetter — lagrer payment likevel for audit. User kan krediteres manuelt.
+    }
+  }
+
+  // 2. Lagre payment-rad med full sporing
+  const paymentData: InsertPayment = {
+    paymentIntentId: paymentIntent.id,
+    stripeChargeId,
+    customerEmail: email,
+    amount: paymentIntent.amount,
+    currency: paymentIntent.currency,
+    status: paymentIntent.status,
+    receiptUrl,
+    referralId: session.metadata?.promotekit_referral || null,
+    couponCode: session.metadata?.coupon_code || null,
+    buyerCountry: session.metadata?.buyer_country || null,
+    vatAmount: session.metadata?.vat_amount ? parseInt(session.metadata.vat_amount) : 0,
+    baseAmount: session.metadata?.base_amount ? parseInt(session.metadata.base_amount) : paymentIntent.amount,
+    vatRate: session.metadata?.vat_rate || null,
+    metadata: session.metadata || null,
+    productType: meta.productType,
+    creditsGranted: meta.creditsGranted,
+    userId: userId as any,
+  };
+  await storage.createPayment(paymentData);
+  console.log(`[webhook] payment saved: ${paymentIntent.id} type=${meta.productType} credits=${meta.creditsGranted}`);
+
+  // 3. Meta Purchase tracking (uendret)
+  const metaEventId = session.metadata?.meta_event_id;
+  if (metaEventId) {
+    const userData = {
+      email,
+      clientIpAddress: session.metadata?.client_ip,
+      clientUserAgent: session.metadata?.user_agent,
+      fbp: session.metadata?.fbp,
+      fbc: session.metadata?.fbc
+    };
+    const eventSourceUrl = session.success_url?.split('?')[0] || 'https://evenero.com/payment-success';
+    trackPurchase(userData, eventSourceUrl, paymentIntent.currency, paymentIntent.amount / 100, metaEventId)
+      .catch(error => console.error('[webhook] Meta Purchase tracking failed:', error));
+  }
+}
+
+async function handleCheckoutSessionExpired(session: any): Promise<void> {
+  console.log(`[webhook] checkout.session.expired: ${session.id} email=${session.customer_details?.email ?? 'n/a'}`);
+  // Ingen DB-handling — Stripe sender denne ved 24t abandoned cart
+  // Senere: kan trigge "din checkout ventet på deg"-mail eller analytics
+}
+
+async function handlePaymentIntentFailed(paymentIntent: any): Promise<void> {
+  console.log(`[webhook] payment_intent.payment_failed: ${paymentIntent.id} code=${paymentIntent.last_payment_error?.code} reason=${paymentIntent.last_payment_error?.message?.slice(0, 100)}`);
+  // Ingen DB-handling — Stripe Dashboard er source of truth for feilede betalinger
+  // Senere: kan logge til analytics for funnel-konvertering
+}
+
+async function handleChargeRefunded(charge: any): Promise<void> {
+  console.log(`[webhook] charge.refunded: ${charge.id} amount_refunded=${charge.amount_refunded}/${charge.amount}`);
+  // Avventer auto-handling per beslutning. Logger kun. Manuell refund-flyt:
+  //   1. Slasse setter users.event_credit -= 1 manuelt
+  //   2. Hvis event er opprettet med credit: deaktiverer via admin-UI
+  // Senere fix: auto-decrement + deaktiver event via consumed_event_id
+  const payment = await storage.getPaymentByChargeId(charge.id);
+  if (payment) {
+    await storage.markPaymentRefunded(charge.id, charge.amount_refunded);
+    console.log(`[webhook] marked payment ${payment.id} as refunded (amount=${charge.amount_refunded}) — manuell credit-justering kreves`);
+  } else {
+    console.log(`[webhook] no matching payment for charge ${charge.id} — refund av pre-cutover-betaling`);
+  }
+}
+
+async function handleDisputeCreated(dispute: any): Promise<void> {
+  console.log(`[webhook] charge.dispute.created: ${dispute.id} charge=${dispute.charge} amount=${dispute.amount} reason=${dispute.reason} status=${dispute.status}`);
+  // Sett disputed_at — manuell håndtering kreves (du har 7 dager på å svare)
+  if (typeof dispute.charge === 'string') {
+    await storage.markPaymentDisputed(dispute.charge, new Date());
+  }
+  // TODO: send alert-mail til lasse@styretavla.no
+}
+
+async function handleDisputeClosed(dispute: any): Promise<void> {
+  console.log(`[webhook] charge.dispute.closed: ${dispute.id} status=${dispute.status}`);
+  // Hvis vunnet (status=won): fjern disputed_at
+  // Hvis tapt (status=lost): behandle som refund — manuelt foreløpig
+  if (dispute.status === 'won' && typeof dispute.charge === 'string') {
+    await storage.markPaymentDisputed(dispute.charge, null);
+  }
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Stripe webhook endpoint - must be before other middleware that parses body
   app.post('/api/webhooks/stripe', async (req, res) => {
@@ -138,99 +303,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     // Handle the event
-    switch (event.type) {
-      case 'checkout.session.completed':
-        const session = event.data.object as any;
-        console.log('Webhook: Checkout session completed:', session.id);
-        console.log('Webhook: Customer email:', session.customer_details?.email);
-        console.log('Webhook: Payment intent:', session.payment_intent);
-        
-        try {
-          // Ensure payment_intent exists and is a string
-          if (!session.payment_intent || typeof session.payment_intent !== 'string') {
-            console.log('No valid payment_intent in session:', session.id);
-            break;
-          }
-
-          // Check if payment already exists
-          const existingPayment = await storage.getPaymentByIntentId(session.payment_intent as string);
-          if (existingPayment) {
-            console.log('Payment already exists in database:', session.payment_intent);
-            break;
-          }
-
-          // Get the PaymentIntent to access payment details
-          const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent as string);
-          
-          let receiptUrl = null;
-          let stripeChargeId = null;
-          
-          // Get charge information for receipt URL
-          if (paymentIntent.latest_charge && typeof paymentIntent.latest_charge === 'string') {
-            const charge = await stripe.charges.retrieve(paymentIntent.latest_charge);
-            receiptUrl = charge.receipt_url;
-            stripeChargeId = charge.id;
-          }
-
-          const paymentData: InsertPayment = {
-            paymentIntentId: paymentIntent.id,
-            stripeChargeId: stripeChargeId,
-            customerEmail: session.customer_details?.email || 'unknown@email.com',
-            amount: paymentIntent.amount,
-            currency: paymentIntent.currency,
-            status: paymentIntent.status,
-            receiptUrl: receiptUrl,
-            referralId: session.metadata?.promotekit_referral || null,
-            couponCode: session.metadata?.coupon_code || null,
-            buyerCountry: session.metadata?.buyer_country || null,
-            vatAmount: session.metadata?.vat_amount ? parseInt(session.metadata.vat_amount) : 0,
-            baseAmount: session.metadata?.base_amount ? parseInt(session.metadata.base_amount) : paymentIntent.amount,
-            vatRate: session.metadata?.vat_rate || null,
-            metadata: session.metadata || null,
-          };
-
-          await storage.createPayment(paymentData);
-          console.log('Payment saved to database via webhook:', paymentIntent.id);
-          
-          // Track Purchase with Meta Conversion API
-          const metaEventId = session.metadata?.meta_event_id;
-          const customerEmail = session.customer_details?.email;
-          
-          if (metaEventId) {
-            console.log('🎯 Webhook: Starting Meta Purchase tracking', {
-              event_id: metaEventId,
-              has_email: !!customerEmail,
-              has_ip: !!session.metadata?.client_ip,
-              has_user_agent: !!session.metadata?.user_agent,
-              has_fbp: !!session.metadata?.fbp,
-              has_fbc: !!session.metadata?.fbc
-            });
-            
-            const userData = {
-              email: customerEmail,
-              clientIpAddress: session.metadata?.client_ip,
-              clientUserAgent: session.metadata?.user_agent,
-              fbp: session.metadata?.fbp,
-              fbc: session.metadata?.fbc
-            };
-            
-            const eventSourceUrl = session.success_url?.split('?')[0] || 'https://evenero.com/payment-success';
-            const currency = paymentIntent.currency;
-            const value = paymentIntent.amount / 100;
-            
-            trackPurchase(userData, eventSourceUrl, currency, value, metaEventId).catch(error => {
-              console.error('❌ Failed to track Purchase with Meta Conversion API:', error);
-            });
-          } else {
-            console.log('⚠️ Webhook: No meta_event_id in session metadata, skipping Meta tracking');
-          }
-        } catch (error: any) {
-          console.error('Error processing checkout.session.completed webhook:', error);
-        }
-        break;
-      
-      default:
-        console.log(`Unhandled event type ${event.type}`);
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed':
+          await handleCheckoutSessionCompleted(event.data.object as any);
+          break;
+        case 'checkout.session.expired':
+          await handleCheckoutSessionExpired(event.data.object as any);
+          break;
+        case 'payment_intent.payment_failed':
+          await handlePaymentIntentFailed(event.data.object as any);
+          break;
+        case 'charge.refunded':
+          await handleChargeRefunded(event.data.object as any);
+          break;
+        case 'charge.dispute.created':
+          await handleDisputeCreated(event.data.object as any);
+          break;
+        case 'charge.dispute.closed':
+          await handleDisputeClosed(event.data.object as any);
+          break;
+        default:
+          console.log(`[webhook] unhandled event type: ${event.type}`);
+      }
+    } catch (error: any) {
+      console.error(`[webhook] error processing ${event.type}:`, error);
+      // Returner 200 likevel — Stripe vil ellers retry, men feilen er logget for manuell follow-up
     }
 
     res.json({ received: true });

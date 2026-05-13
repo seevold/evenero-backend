@@ -1,11 +1,14 @@
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb, uuid } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// users-tabell — matcher main-api sin definisjon (uuid pk, email, event_credit).
+// Web-api leser/oppdaterer kun event_credit + finner user via email.
 export const users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+  id: uuid("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  name: text("name"),
+  event_credit: integer("event_credit").default(0).notNull(),
 });
 
 export const payments = pgTable("payments", {
@@ -24,6 +27,14 @@ export const payments = pgTable("payments", {
   baseAmount: integer("base_amount").notNull(), // Base amount before VAT in cents
   vatRate: text("vat_rate"), // e.g., "25%"
   metadata: jsonb("metadata"), // Additional Stripe metadata
+  // Product- og kreditt-sporing — utvidbart via Stripe product-metadata
+  productType: text("product_type").notNull().default("event_credit"),
+  creditsGranted: integer("credits_granted").notNull().default(1),
+  userId: uuid("user_id"),                       // FK -> users(id), set NULL ved sletting
+  consumedEventId: uuid("consumed_event_id"),    // FK -> events(id), settes når event opprettes
+  refundedAt: timestamp("refunded_at"),
+  refundAmount: integer("refund_amount"),
+  disputedAt: timestamp("disputed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -43,8 +54,8 @@ export const supportRequests = pgTable("support_requests", {
 
 
 export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
+  email: true,
+  name: true,
 });
 
 export const insertPaymentSchema = createInsertSchema(payments).omit({

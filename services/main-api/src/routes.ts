@@ -934,8 +934,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ detail: "Insufficient event credit" });
       }
 
+      // Aktiver event + dekrementer credit + link payment (best-effort).
+      // FIFO: eldste ubrukte payment konsumeres. Hvis ingen finnes (manuell credit-tildeling)
+      // gjør vi credit-justering uten payment-link — logges som warning.
       await storage.updateEvent(event_id, { active: true });
       await storage.updateUser(user.id, { event_credit: eventCredit - 1 });
+
+      try {
+        const consumed = await storage.consumeOldestPaymentForUser(user.id, event.id);
+        if (consumed) {
+          console.log(`[event-activate] linked event ${event.id} -> payment ${consumed.id}`);
+        } else {
+          console.warn(`[event-activate] no unconsumed payment for user ${user.id} (event_credit decremented anyway — manuell credit?)`);
+        }
+      } catch (linkErr: any) {
+        // Aldri rull tilbake event-aktivering pga link-feil
+        console.error(`[event-activate] failed to link payment for event ${event.id}:`, linkErr);
+      }
 
       res.json({
         status: "success",
