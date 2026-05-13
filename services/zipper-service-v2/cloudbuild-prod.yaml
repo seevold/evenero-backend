@@ -1,4 +1,4 @@
-# Cloud Build pipeline for zipper-service-v2 Cloud Run-deploy.
+# Cloud Build pipeline for zipper-service-v2 Cloud Run-deploy (PROD).
 
 steps:
   - id: build
@@ -28,13 +28,13 @@ steps:
     args:
       - run
       - deploy
-      - zipper-service-v2-staging
+      - zipper-service-v2
       - --image=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/zipper-service-v2:${SHORT_SHA}
       - --region=europe-north1
       - --project=${PROJECT_ID}
-      - --service-account=staging-runner@${PROJECT_ID}.iam.gserviceaccount.com
-      - --set-env-vars=GCS_BUCKET_NAME=evenero-staging-cloud,GCP_PROJECT_ID=${PROJECT_ID},QUEUE_LOCATION=europe-west1,QUEUE_NAME=zip-queue-v2-staging,WORKER_SERVICE_ACCOUNT=staging-runner@${PROJECT_ID}.iam.gserviceaccount.com,SERVICE_URL=https://zipper-service-v2-staging-467452422363.europe-north1.run.app,WEBHOOK_URL=https://main-api-staging-v7cr3xx5ca-lz.a.run.app/api/zip-ready
-      - --set-secrets=WEBHOOK_API_KEY=staging-webhook-api-key:latest
+      - --service-account=prod-runner@${PROJECT_ID}.iam.gserviceaccount.com
+      - --set-env-vars=GCS_BUCKET_NAME=evenero-cloud,GCP_PROJECT_ID=${PROJECT_ID},QUEUE_LOCATION=europe-west1,QUEUE_NAME=zip-queue-v2-prod,WORKER_SERVICE_ACCOUNT=prod-runner@${PROJECT_ID}.iam.gserviceaccount.com,SERVICE_URL=https://zipper-service-v2-467452422363.europe-north1.run.app,WEBHOOK_URL=https://main-api-467452422363.europe-north1.run.app/api/zip-ready
+      - --set-secrets=WEBHOOK_API_KEY=prod-webhook-api-key:latest
       - --memory=512Mi
       - --cpu=1
       - --concurrency=3

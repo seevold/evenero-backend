@@ -1,4 +1,4 @@
-# Cloud Build pipeline for image-processor Cloud Run-deploy.
+# Cloud Build pipeline for image-processor Cloud Run-deploy (PROD).
 # Source er repo-rot, dir peker til services/image-processor.
 
 steps:
@@ -29,12 +29,12 @@ steps:
     args:
       - run
       - deploy
-      - image-processor-v2-staging
+      - image-processor-v2
       - --image=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/image-processor-v2:${SHORT_SHA}
       - --region=europe-north1
       - --project=${PROJECT_ID}
-      - --service-account=staging-runner@${PROJECT_ID}.iam.gserviceaccount.com
-      - --set-env-vars=GCS_BUCKET_NAME=evenero-staging-cloud
+      - --service-account=prod-runner@${PROJECT_ID}.iam.gserviceaccount.com
+      - --set-env-vars=GCS_BUCKET_NAME=evenero-cloud
       - --memory=1Gi
       - --cpu=1
       - --concurrency=4

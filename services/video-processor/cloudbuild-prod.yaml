@@ -1,4 +1,4 @@
-# Cloud Build pipeline for video-processor Cloud Run-deploy.
+# Cloud Build pipeline for video-processor Cloud Run-deploy (PROD).
 
 steps:
   - id: build
@@ -28,12 +28,12 @@ steps:
     args:
       - run
       - deploy
-      - video-processor-v2-staging
+      - video-processor-v2
       - --image=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/video-processor-v2:${SHORT_SHA}
       - --region=europe-north1
       - --project=${PROJECT_ID}
-      - --service-account=staging-runner@${PROJECT_ID}.iam.gserviceaccount.com
-      - --set-env-vars=GCS_BUCKET_NAME=evenero-staging-cloud
+      - --service-account=prod-runner@${PROJECT_ID}.iam.gserviceaccount.com
+      - --set-env-vars=GCS_BUCKET_NAME=evenero-cloud
       - --memory=4Gi
       - --cpu=4
       - --concurrency=1
