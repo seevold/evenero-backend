@@ -794,9 +794,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ detail: "Event not found" });
       }
 
-      // Sikkerhet: PIN-koden (event_secret) er sensitiv — kun synlig for
-      // owner/cohost. Galleri-besøkende får null tilbake. Beskytter mot at
-      // hvem som helst leser PIN fra /events/{id}-responsen.
+      // Sikkerhet: strip PII og admin-data for besøkende som ikke er
+      // owner/cohost. Beholder felter som galleri/upload-sidene trenger
+      // (event_name, event_photo, cover_*, image_moderation, upload_requires_auth,
+      // uploads_disabled, curated_public_enabled, event_access_type, event_date,
+      // event_location, event_description, storage-limits, qr_settings, active,
+      // event_id/id/event_custom_id, created_at, event_start/expiry_date,
+      // deleted_at, event_type, reminders_enabled).
+      //
+      // NB: event_secret (PIN) er IKKE strippet her. PinProtection-komponenten
+      // i frontend sammenligner PIN på klient-siden, så å sette den til null
+      // ville bypasse PIN-gate-en helt. Ekte fix krever server-side PIN-
+      // validering — eget arbeid, ikke gjort her. PIN-leaken her er status
+      // quo, ikke noe denne endringen har introdusert.
       const token = getTokenFromHeader(req);
       let role: 'owner' | 'cohost' | 'guest' | 'none' = 'none';
       if (token) {
@@ -805,7 +815,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const safe = role === 'owner' || role === 'cohost'
         ? event
-        : { ...event, event_secret: null };
+        : {
+            ...event,
+            event_owner: null,
+            event_co_host: null,
+            created_from_payment_id: null,
+            deactivated_reason: null,
+          };
 
       res.json(safe);
     } catch (error) {
@@ -1421,11 +1437,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!event) {
         return res.status(404).json({ detail: "Event not found" });
       }
-      
-      // Return co-hosts as an array - API client will wrap with success/data
-      const coHosts = event.event_co_host ? event.event_co_host.split(',').map(h => h.trim()) : [];
+
+      // PII-beskyttelse: cohost-e-poster avsløres KUN til owner/cohost selv.
+      // Andre kallere (galleri-besøkende, upload-uten-login) får tom liste i
+      // stedet for 401/403 — frontend treats tom liste som "ingen cohosts",
+      // PinProtection-skip via cohost-match trigges ikke (riktig), og vi
+      // unngår error-spam i logs ved hver galleri-load.
+      const token = getTokenFromHeader(req);
+      let canSeeList = false;
+      if (token) {
+        const userEmail = await verifyToken(token);
+        if (userEmail) {
+          const role = await storage.getUserRoleForEvent(userEmail, event);
+          canSeeList = role === 'owner' || role === 'cohost';
+        }
+      }
+
+      const coHosts = canSeeList && event.event_co_host
+        ? event.event_co_host.split(',').map(h => h.trim())
+        : [];
       res.json({ co_hosts: coHosts });
     } catch (error) {
+      console.error('Error fetching co-hosts:', error);
       res.status(500).json({ detail: "Internal server error" });
     }
   });
