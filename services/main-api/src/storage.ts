@@ -1121,6 +1121,9 @@ export class PostgreSQLStorage implements IStorage {
     pendingImages: number;
     pendingVideos: number;
     totalStorageBytes: number;
+    lifetimeImages: number;
+    lifetimeVideos: number;
+    lifetimeBytes: number;
     totalReminders: number;
     sentReminders: number;
   }> {
@@ -1152,7 +1155,14 @@ export class PostgreSQLStorage implements IStorage {
         archivedVideos: sql<number>`COUNT(*) FILTER (WHERE ${event_images.archived} = true AND LOWER(${event_images.file_extension}) IN ('mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', '3gp', '.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp'))`,
         pendingImages: sql<number>`COUNT(*) FILTER (WHERE ${event_images.moderation_status} = 'pending' AND ${event_images.archived} = false AND (${event_images.file_extension} IS NULL OR LOWER(${event_images.file_extension}) NOT IN ('mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', '3gp', '.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp')))`,
         pendingVideos: sql<number>`COUNT(*) FILTER (WHERE ${event_images.moderation_status} = 'pending' AND ${event_images.archived} = false AND LOWER(${event_images.file_extension}) IN ('mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', '3gp', '.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp'))`,
-        storageBytes: sql<number>`COALESCE(SUM(${event_images.file_size}) FILTER (WHERE ${event_images.archived} = false), 0)`
+        storageBytes: sql<number>`COALESCE(SUM(${event_images.file_size}) FILTER (WHERE ${event_images.archived} = false), 0)`,
+        // Lifetime-tellere: alle rader uavhengig av archived/moderation. Brukes
+        // som "for gøy"-teller på admin-siden — antall opplastet noensinne.
+        // Permanent-slettede rader er borte (hard-delete), så historiske er
+        // estimat. Fra dette tidspunktet og fremover er tellingen eksakt.
+        lifetimeImages: sql<number>`COUNT(*) FILTER (WHERE ${event_images.file_extension} IS NULL OR LOWER(${event_images.file_extension}) NOT IN ('mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', '3gp', '.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp'))`,
+        lifetimeVideos: sql<number>`COUNT(*) FILTER (WHERE LOWER(${event_images.file_extension}) IN ('mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', '3gp', '.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp'))`,
+        lifetimeBytes: sql<number>`COALESCE(SUM(${event_images.file_size}), 0)`
       }).from(event_images),
       
       // Reminder stats
@@ -1175,6 +1185,9 @@ export class PostgreSQLStorage implements IStorage {
       pendingImages: Number(mediaStats[0]?.pendingImages) || 0,
       pendingVideos: Number(mediaStats[0]?.pendingVideos) || 0,
       totalStorageBytes: Number(mediaStats[0]?.storageBytes) || 0,
+      lifetimeImages: Number(mediaStats[0]?.lifetimeImages) || 0,
+      lifetimeVideos: Number(mediaStats[0]?.lifetimeVideos) || 0,
+      lifetimeBytes: Number(mediaStats[0]?.lifetimeBytes) || 0,
       totalReminders: Number(reminderStats[0]?.total) || 0,
       sentReminders: Number(reminderStats[0]?.sent) || 0
     };
