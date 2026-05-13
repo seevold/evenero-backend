@@ -379,11 +379,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const token = generateToken(email);
       await storage.updateUserToken(email, token);
 
+      // Returner samme bruker-felter som /api/auth slik at frontend (auth.ts)
+      // kan populere user-objektet komplett uten en ekstra /api/auth-runde.
+      // Mangler `role` her tidligere → admin-rute-sjekk feilet rett etter login.
       res.json({
         message: "User authenticated successfully",
-        email: email,
+        id: user.id,
+        email: user.email,
         token: token,
-        name: user.name
+        name: user.name,
+        role: user.role,
+        active: user.active,
+        event_credit: user.event_credit,
+        preferred_locale: user.preferred_locale
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
