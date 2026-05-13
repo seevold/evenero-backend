@@ -188,9 +188,14 @@ export function renderEmail(opts: LayoutOptions): RenderedEmail {
   // Outer table is the email-client way to constrain max-width and center.
   // Card div sits inside the table cell.
   //
-  // Header: favicon-ikon (40px) sentrert, "evenero"-wordmark under i Inter
-  // weight 700. Liten gradient-strek under wordmark som visuell signatur.
-  // Mso-conditional bgcolor på <td> sikrer Outlook-rendering.
+  // Header: favicon-ikon + wordmark + tynn gradient-strek.
+  //
+  // Gmail-clipping-fix: vi droppet tidligere Google Fonts <link>+<style>
+  // blokker fordi Gmail stripper dem uansett — bare dødvekt mot 102KB-
+  // grensen. Preheader-padding redusert fra 60× til 12× zwnj. Footer
+  // slanket til én linje for å unngå at Gmail tolker bunnen som
+  // signatur/quoted-content og kollapser alt etter CTA-knappen under
+  // "..." (trimmed content) på mobil.
   const html = `<!doctype html>
 <html lang="${esc(opts.lang)}">
 <head>
@@ -199,20 +204,13 @@ export function renderEmail(opts: LayoutOptions): RenderedEmail {
 <meta name="color-scheme" content="light only">
 <meta name="supported-color-schemes" content="light only">
 <title>Evenero</title>
-<!-- Inter for klienter som tillater web fonts. Fallback til system-sans i TOKENS.sans. -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-</style>
 </head>
 <body style="margin:0;padding:0;background:${TOKENS.bgPage};-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;">
 
 <!-- Preheader: hidden text shown in inbox preview alongside the subject. -->
 <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:transparent;opacity:0;">
 ${esc(opts.preheader)}
-${'&zwnj;&nbsp;'.repeat(60)}
+${'&zwnj;&nbsp;'.repeat(12)}
 </div>
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${TOKENS.bgPage};">
@@ -233,10 +231,9 @@ ${'&zwnj;&nbsp;'.repeat(60)}
 ${blocksHtml}
 </div>
 
-<!-- Footer -->
-<div style="text-align:center;padding:28px 16px 8px 16px;">
-  <p style="margin:0 0 6px 0;font-family:${TOKENS.sans};font-size:13px;line-height:1.55;color:${TOKENS.textMuted};white-space:pre-line;">${esc(opts.footer)}</p>
-  <p style="margin:10px 0 0 0;font-family:${TOKENS.sans};font-size:12px;color:${TOKENS.textFaint};">© ${year} Evenero · <a href="https://evenero.com" target="_blank" rel="noopener" style="color:${TOKENS.textMuted};text-decoration:underline;">evenero.com</a></p>
+<!-- Footer: slank, én linje, ingen ekstra brand-mention som Gmail tolker som signatur -->
+<div style="text-align:center;padding:24px 16px 8px 16px;">
+  <p style="margin:0;font-family:${TOKENS.sans};font-size:12px;line-height:1.55;color:${TOKENS.textFaint};">© ${year} Evenero · <a href="https://evenero.com" target="_blank" rel="noopener" style="color:${TOKENS.textFaint};text-decoration:none;">evenero.com</a></p>
 </div>
 
 </td></tr>
