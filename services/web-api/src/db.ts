@@ -4,7 +4,7 @@
 
 import { Pool, type PoolConfig } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Connector, IpAddressTypes } from "@google-cloud/cloud-sql-connector";
+import { Connector, IpAddressTypes, AuthTypes } from "@google-cloud/cloud-sql-connector";
 import * as schema from "@shared/schema";
 
 if (!process.env.DATABASE_URL && !process.env.CLOUD_SQL_INSTANCE) {
@@ -13,20 +13,22 @@ if (!process.env.DATABASE_URL && !process.env.CLOUD_SQL_INSTANCE) {
 
 async function buildPool(): Promise<Pool> {
   if (process.env.CLOUD_SQL_INSTANCE) {
+    const useIam = process.env.DB_IAM_AUTH === "true";
     const connector = new Connector();
     const clientOpts = await connector.getOptions({
       instanceConnectionName: process.env.CLOUD_SQL_INSTANCE,
       ipType: IpAddressTypes.PUBLIC,
+      ...(useIam ? { authType: AuthTypes.IAM } : {}),
     });
 
     const config: PoolConfig = {
       ...clientOpts,
-      user: process.env.DB_USER || "postgres",
-      password: process.env.DB_PASSWORD,
+      user: process.env.DB_USER || (useIam ? undefined : "postgres"),
+      ...(useIam ? {} : { password: process.env.DB_PASSWORD }),
       database: process.env.DB_NAME || "postgres",
       max: 5,
     };
-    console.log(`[DB] web-api connected via Cloud SQL Connector to ${process.env.CLOUD_SQL_INSTANCE}`);
+    console.log(`[DB] web-api connected via Cloud SQL Connector to ${process.env.CLOUD_SQL_INSTANCE} (auth=${useIam ? "IAM" : "password"}, user=${config.user})`);
     return new Pool(config);
   }
 

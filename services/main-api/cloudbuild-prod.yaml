@@ -1,0 +1,40 @@
+# Cloud Build pipeline for main-api PROD Cloud Run-deploy.
+# Kjøres parallelt med cloudbuild.yaml (staging).
+# Source er repo-rot, derfor `dir: services/main-api` på build-steget.
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    dir: services/main-api
+    args:
+      - build
+      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/main-api:${SHORT_SHA}
+      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/main-api:latest
+      - .
+
+  - id: push-sha
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/main-api:${SHORT_SHA}
+
+  - id: push-latest
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/main-api:latest
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - main-api
+      - --image=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/main-api:${SHORT_SHA}
+      - --region=europe-north1
+      - --project=${PROJECT_ID}
+      - --quiet
+
+options:
+  logging: CLOUD_LOGGING_ONLY

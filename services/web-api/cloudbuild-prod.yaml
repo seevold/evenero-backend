@@ -1,0 +1,39 @@
+# Cloud Build pipeline for web-api PROD Cloud Run-deploy.
+# Kjøres parallelt med cloudbuild.yaml (staging).
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    dir: services/web-api
+    args:
+      - build
+      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/web-api:${SHORT_SHA}
+      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/web-api:latest
+      - .
+
+  - id: push-sha
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/web-api:${SHORT_SHA}
+
+  - id: push-latest
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/web-api:latest
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - web-api
+      - --image=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/web-api:${SHORT_SHA}
+      - --region=europe-north1
+      - --project=${PROJECT_ID}
+      - --quiet
+
+options:
+  logging: CLOUD_LOGGING_ONLY
