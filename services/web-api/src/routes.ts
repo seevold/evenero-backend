@@ -690,13 +690,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Klienten kan polle eller bare vise success-bekreftelse fra Stripe.
         }
 
+        // Beløp + valuta hentes fra Stripe-session direkte (ikke fra DB), slik at
+        // success-siden vises korrekt selv om webhook ikke har lagret payment-rad
+        // ennå. Webhook er asynkron — kan komme ~0-3 sek etter session.status=complete.
+        const pi = session.payment_intent as any;
+        const amountFromSession = (typeof pi === 'object' ? pi?.amount : null) ?? session.amount_total ?? 0;
+        const currencyFromSession = (typeof pi === 'object' ? pi?.currency : null) ?? session.currency ?? 'nok';
+
         const responseData = {
           status: session.status,
           customer_email: session.customer_details?.email,
           payment_intent: paymentIntentId,
           receipt_url: dbPayment?.receiptUrl || null,
-          amount: dbPayment?.amount || 0,
-          currency: dbPayment?.currency || session.currency || 'nok',
+          amount: dbPayment?.amount ?? amountFromSession,
+          currency: dbPayment?.currency ?? currencyFromSession,
           metadata: session.metadata,
           // Include Adaptive Pricing presentment details if available
           presentment_details: session.presentment_details || null
