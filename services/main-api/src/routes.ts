@@ -216,7 +216,11 @@ async function isEventOwnerOrCoHost(userEmail: string, event: Event): Promise<bo
 
 // Validation schemas
 const sendPinSchema = z.object({
-  email: z.string().email()
+  email: z.string().email(),
+  // Optional same-origin path å returnere bruker til etter PIN-verifisering.
+  // Må starte med "/" og IKKE "//" (protokoll-relativt = annen origin).
+  // Begrenser også til ASCII for å unngå rart input.
+  redirect: z.string().regex(/^\/(?!\/)[\w\-./?&=#%]*$/).optional()
 });
 
 const verifyPinSchema = z.object({
@@ -300,7 +304,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   registerBothPaths("post", "/send-pin-code", async (req, res) => {
     try {
-      const { email } = sendPinSchema.parse(req.body);
+      const { email, redirect } = sendPinSchema.parse(req.body);
       
       // Rate limiting check - prevent spam/abuse
       const rateLimitKey = getRateLimitKey('send', email);
@@ -338,7 +342,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Construct login URL — bruker PUBLIC_APP_URL slik at lenken peker
         // til frontend (event.evenero.com / staging-app.evenero.com / .vercel.app)
         // og ikke Cloud Run-host som requests proxes fra.
-        const loginUrl = `${getBaseUrl(req)}/login/${encodeURIComponent(email)}?pin=${pinCode}`;
+        // Hvis redirect er satt (f.eks. fra upload-flyt på `/<eventId>/upload`),
+        // legges den ved så login.tsx kan returnere bruker dit etter auth.
+        const baseLoginUrl = `${getBaseUrl(req)}/login/${encodeURIComponent(email)}?pin=${pinCode}`;
+        const loginUrl = redirect
+          ? `${baseLoginUrl}&redirect=${encodeURIComponent(redirect)}`
+          : baseLoginUrl;
 
         await sendPinCodeEmail(email, pinCode, userLocale, loginUrl);
       } catch (emailError) {
