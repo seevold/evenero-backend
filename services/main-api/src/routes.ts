@@ -795,32 +795,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Sikkerhet: strip PII og admin-data for besøkende som ikke er
-      // owner/cohost. Beholder felter som galleri/upload-sidene trenger
-      // (event_name, event_photo, cover_*, image_moderation, upload_requires_auth,
-      // uploads_disabled, curated_public_enabled, event_access_type, event_date,
-      // event_location, event_description, storage-limits, qr_settings, active,
-      // event_id/id/event_custom_id, created_at, event_start/expiry_date,
-      // deleted_at, event_type, reminders_enabled).
-      //
-      // NB: event_secret (PIN) er IKKE strippet her. PinProtection-komponenten
-      // i frontend sammenligner PIN på klient-siden, så å sette den til null
-      // ville bypasse PIN-gate-en helt. Ekte fix krever server-side PIN-
-      // validering — eget arbeid, ikke gjort her. PIN-leaken her er status
-      // quo, ikke noe denne endringen har introdusert.
+      // owner/cohost. Returnerer i tillegg event_has_secret (boolean) slik
+      // at frontend kan vite om PIN kreves uten å se selve PIN-en. PIN
+      // valideres server-side via POST /events/:id/verify-pin.
       const token = getTokenFromHeader(req);
       let role: 'owner' | 'cohost' | 'guest' | 'none' = 'none';
       if (token) {
         const email = await verifyToken(token);
         if (email) role = await storage.getUserRoleForEvent(email, event);
       }
+      const eventHasSecret = !!(event.event_secret && event.event_secret.length > 0);
       const safe = role === 'owner' || role === 'cohost'
-        ? event
+        ? { ...event, event_has_secret: eventHasSecret }
         : {
             ...event,
             event_owner: null,
             event_co_host: null,
+            event_secret: null,  // PIN aldri synlig for ikke-owner/cohost
             created_from_payment_id: null,
             deactivated_reason: null,
+            event_has_secret: eventHasSecret,
           };
 
       res.json(safe);
@@ -1421,6 +1415,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error("Check storage error:", error);
+      res.status(500).json({ detail: "Internal server error" });
+    }
+  });
+
+  // Server-side PIN-validering for event-secret. Erstatter klient-side
+  // compare som krevde at PIN-en var i event-response. Idempotent, ingen
+  // rate-limit nå (lav-risiko-event-gate, ikke account-takeover). Hvis
+  // brute-force blir et problem, legg til rate-limit per IP+eventId.
+  registerBothPaths("post", "/events/:event_id/verify-pin", async (req, res) => {
+    const { event_id } = req.params;
+    const { pin } = req.body || {};
+
+    if (!event_id || typeof pin !== 'string') {
+      return res.status(400).json({ detail: "event_id and pin (string) required" });
+    }
+
+    try {
+      const event = await storage.getEvent(event_id);
+      if (!event) {
+        return res.status(404).json({ detail: "Event not found" });
+      }
+
+      // Hvis event ikke har PIN konfigurert, regn det som "verified" trivielt.
+      if (!event.event_secret || event.event_secret.length === 0) {
+        return res.json({ verified: true });
+      }
+
+      const ok = pin === event.event_secret;
+      if (!ok) {
+        return res.status(401).json({ verified: false, detail: "Invalid PIN" });
+      }
+      res.json({ verified: true });
+    } catch (error) {
+      console.error('Error verifying event PIN:', error);
       res.status(500).json({ detail: "Internal server error" });
     }
   });
