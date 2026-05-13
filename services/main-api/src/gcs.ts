@@ -174,6 +174,26 @@ export async function deleteFile(filename: string): Promise<boolean> {
   }
 }
 
+// Slett alle filer som matcher et prefix (f.eks. "derived/{ev}/{med}/").
+// Returnerer antall slettede filer. Idempotent: tom mappe gir 0.
+export async function deletePrefix(prefix: string): Promise<number> {
+  if (!storage) {
+    console.error("[GCS] Not initialized");
+    return 0;
+  }
+  try {
+    const bucket = storage.bucket(GCS_BUCKET_NAME);
+    const [files] = await bucket.getFiles({ prefix });
+    if (files.length === 0) return 0;
+    await Promise.all(files.map((f) => f.delete({ ignoreNotFound: true } as any)));
+    console.log(`[GCS] Deleted ${files.length} files under prefix: ${prefix}`);
+    return files.length;
+  } catch (error: any) {
+    console.error(`[GCS] Failed to delete prefix ${prefix}:`, error?.message || error);
+    return 0;
+  }
+}
+
 // Extract GCS-path fra full URL eller gs://-URI.
 // Eksempel-input:
 //   https://storage.googleapis.com/evenero-cloud/images/abc.jpg?token=xyz

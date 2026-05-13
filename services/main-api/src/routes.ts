@@ -2957,57 +2957,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Delete files from Google Cloud Storage first - only delete DB rows for successfully deleted GCS files
-      // Must delete both original and derivative versions:
-      // - Images: original + _small thumbnail
-      // - Videos: original + _compressed version
-      const { deleteFile } = await import('./gcs');
+      // Støtter to path-konvensjoner:
+      // - v2: originals/{ev}/{med}.ext + derived/{ev}/{med}/{thumb,medium,poster,preview}.*
+      // - v1: images/{filename}.ext + images/{filename}_small.ext (eller _compressed for video)
+      const { deleteFile, deletePrefix, extractGcsPath } = await import('./gcs');
       const successfullyDeletedIds: string[] = [];
       const failedImages: { id: string; url: string; reason: string }[] = [];
-      
-      // Video extensions to check
-      const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', '3gp'];
 
       for (const image of archivedImages) {
         try {
-          // Extract filename from URL (e.g., "https://storage.googleapis.com/evenero-cloud/images/abc123.jpg" -> "images/abc123.jpg")
-          const url = image.image_url;
-          const match = url.match(/\/images\/(.+?)(?:\?|$)/);
-          if (match) {
-            const filename = match[1];
-            const gcsPath = `images/${filename}`;
-            const lastDotIndex = filename.lastIndexOf('.');
-            const ext = lastDotIndex > 0 ? filename.slice(lastDotIndex + 1).toLowerCase() : '';
-            
-            // Check if this is a video based on file extension
-            const isVideo = videoExtensions.includes(ext) || 
-                           (image.file_extension && videoExtensions.includes(image.file_extension.toLowerCase().replace('.', '')));
-            
-            // Generate derivative path based on media type
-            // Videos: _compressed suffix (e.g., "video.mp4" -> "video_compressed.mp4")
-            // Images: _small suffix (e.g., "image.jpg" -> "image_small.jpg")
-            const derivativeSuffix = isVideo ? '_compressed' : '_small';
-            const derivativeFilename = lastDotIndex > 0 
-              ? filename.slice(0, lastDotIndex) + derivativeSuffix + filename.slice(lastDotIndex)
-              : filename + derivativeSuffix;
-            const derivativePath = `images/${derivativeFilename}`;
-            
-            // Delete original file (required)
-            const originalDeleted = await deleteFile(gcsPath);
-            
-            // Delete derivative (best effort - may not exist for all media)
-            const derivativeDeleted = await deleteFile(derivativePath);
-            
-            if (originalDeleted) {
-              successfullyDeletedIds.push(image.id);
-              const derivativeType = isVideo ? 'compressed' : 'thumbnail';
-              console.log(`[GCS] Deleted original: ${gcsPath}${derivativeDeleted ? `, ${derivativeType}: ${derivativePath}` : ` (no ${derivativeType})`}`);
-            } else {
-              failedImages.push({ id: image.id, url: gcsPath, reason: 'GCS delete returned false for original' });
-              console.warn(`[GCS] Failed to delete original file: ${gcsPath}`);
-            }
-          } else {
+          const gcsPath = extractGcsPath(image.image_url);
+          if (!gcsPath) {
             failedImages.push({ id: image.id, url: image.image_url, reason: 'Could not extract GCS path from URL' });
             console.warn(`[GCS] Could not extract path from URL: ${image.image_url}`);
+            continue;
+          }
+
+          // v2-path: originals/{ev}/{med}.ext → slett derived/{ev}/{med}/ prefix også
+          const v2Match = gcsPath.match(/^originals\/([^/]+)\/([^/]+)\.[^./]+$/);
+          if (v2Match) {
+            const [, evId, medId] = v2Match;
+            const originalDeleted = await deleteFile(gcsPath);
+            const derivedCount = await deletePrefix(`derived/${evId}/${medId}/`);
+            if (originalDeleted) {
+              successfullyDeletedIds.push(image.id);
+              console.log(`[GCS] v2 deleted: ${gcsPath} + ${derivedCount} derived`);
+            } else {
+              failedImages.push({ id: image.id, url: gcsPath, reason: 'GCS delete returned false for v2 original' });
+            }
+            continue;
+          }
+
+          // v1-path: images/{filename}.ext → også _small (bilde) / _compressed (video)
+          const filename = gcsPath.replace(/^images\//, '');
+          const lastDotIndex = filename.lastIndexOf('.');
+          const ext = lastDotIndex > 0 ? filename.slice(lastDotIndex + 1).toLowerCase() : '';
+          const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', '3gp'];
+          const isVideo = videoExtensions.includes(ext) ||
+            (image.file_extension && videoExtensions.includes(image.file_extension.toLowerCase().replace('.', '')));
+          const derivativeSuffix = isVideo ? '_compressed' : '_small';
+          const derivativeFilename = lastDotIndex > 0
+            ? filename.slice(0, lastDotIndex) + derivativeSuffix + filename.slice(lastDotIndex)
+            : filename + derivativeSuffix;
+          const derivativePath = `images/${derivativeFilename}`;
+
+          const originalDeleted = await deleteFile(gcsPath);
+          const derivativeDeleted = await deleteFile(derivativePath);
+
+          if (originalDeleted) {
+            successfullyDeletedIds.push(image.id);
+            const derivativeType = isVideo ? 'compressed' : 'thumbnail';
+            console.log(`[GCS] v1 deleted: ${gcsPath}${derivativeDeleted ? `, ${derivativeType}: ${derivativePath}` : ` (no ${derivativeType})`}`);
+          } else {
+            failedImages.push({ id: image.id, url: gcsPath, reason: 'GCS delete returned false for v1 original' });
           }
         } catch (gcsError) {
           failedImages.push({ id: image.id, url: image.image_url, reason: String(gcsError) });
