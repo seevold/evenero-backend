@@ -677,44 +677,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let paymentIntentId = null;
         
         // Handle paid transactions (with payment_intent)
+        // VIKTIG: vi oppretter IKKE payment-rad her — det er webhook sin jobb.
+        // Hvis vi opprettet her, ville webhook sin idempotency-check sett en
+        // eksisterende rad og hoppet over credit-økning → bruker fikk aldri credit.
+        // session-status er kun for å vise status til kunden; lese-only mot DB.
         if (session.payment_intent) {
-          paymentIntentId = typeof session.payment_intent === 'string' 
-            ? session.payment_intent 
+          paymentIntentId = typeof session.payment_intent === 'string'
+            ? session.payment_intent
             : session.payment_intent.id;
           dbPayment = await storage.getPaymentByIntentId(paymentIntentId);
-          
-          if (!dbPayment) {
-            const paymentIntent = session.payment_intent as any;
-            let receiptUrl = null;
-            let stripeChargeId = null;
-            
-            // Get receipt URL from charges
-            if (paymentIntent.charges && paymentIntent.charges.data && paymentIntent.charges.data.length > 0) {
-              const charge = paymentIntent.charges.data[0];
-              receiptUrl = charge.receipt_url;
-              stripeChargeId = charge.id;
-            }
-
-            const paymentData: InsertPayment = {
-              paymentIntentId: paymentIntent.id,
-              stripeChargeId: stripeChargeId,
-              customerEmail: session.customer_details?.email || 'unknown@email.com',
-              amount: paymentIntent.amount,
-              currency: paymentIntent.currency,
-              status: paymentIntent.status,
-              receiptUrl: receiptUrl,
-              referralId: session.metadata?.promotekit_referral || null,
-              couponCode: session.metadata?.coupon_code || null,
-              buyerCountry: session.metadata?.buyer_country || null,
-              vatAmount: session.metadata?.vat_amount ? parseInt(session.metadata.vat_amount) : 0,
-              baseAmount: session.metadata?.base_amount ? parseInt(session.metadata.base_amount) : paymentIntent.amount,
-              vatRate: session.metadata?.vat_rate || null,
-              metadata: session.metadata || null,
-            };
-
-            dbPayment = await storage.createPayment(paymentData);
-            console.log("Payment saved to database during session status check:", paymentIntent.id);
-          }
+          // Hvis dbPayment er null her, har webhook ikke kommet ennå.
+          // Klienten kan polle eller bare vise success-bekreftelse fra Stripe.
         }
 
         const responseData = {
