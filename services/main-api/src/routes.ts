@@ -107,6 +107,14 @@ function generatePinCode(): string {
 }
 
 function getBaseUrl(req: any): string {
+  // PUBLIC_APP_URL settes per miljø:
+  //   staging  → https://staging-app.evenero.com (eller .vercel.app)
+  //   prod     → https://event.evenero.com (etter cutover)
+  // Bruker dette først — req.get('host') vil ofte være selve Cloud Run-URL-en
+  // (fordi requests proxes fra Vercel) og gir feil lenker i e-poster.
+  if (process.env.PUBLIC_APP_URL) {
+    return process.env.PUBLIC_APP_URL.replace(/\/$/, '');
+  }
   const protocol = req.protocol || 'https';
   const host = req.get('host') || req.headers.host || 'evenero.com';
   return `${protocol}://${host}`;
@@ -327,10 +335,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const { sendPinCodeEmail, resolveEmailLocale } = await import('./emails/index.js');
         const userLocale = resolveEmailLocale(req, user);
 
-        // Construct login URL with pre-filled email and PIN
-        const protocol = req.protocol;
-        const host = req.get('host');
-        const loginUrl = `${protocol}://${host}/login/${encodeURIComponent(email)}?pin=${pinCode}`;
+        // Construct login URL — bruker PUBLIC_APP_URL slik at lenken peker
+        // til frontend (event.evenero.com / staging-app.evenero.com / .vercel.app)
+        // og ikke Cloud Run-host som requests proxes fra.
+        const loginUrl = `${getBaseUrl(req)}/login/${encodeURIComponent(email)}?pin=${pinCode}`;
 
         await sendPinCodeEmail(email, pinCode, userLocale, loginUrl);
       } catch (emailError) {
@@ -2148,7 +2156,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         mediaIds: mediaFilenames,
         userEmail: requestedBy,
         eventName: event.event_name || 'your event',
-        eventId: event.id,
+        // Zipper-v2 bruker dette i søke-paths (originals/{eventId}/{mediaId}).
+        // GCS upload-stier bruker event.event_id (short form), ikke event.id (UUID).
+        // Holdes konsekvent for å finne v2-filene i bucket.
+        eventId: event.event_id,
       });
     } catch (err) {
       console.error('Zipper v2 call failed:', err);
