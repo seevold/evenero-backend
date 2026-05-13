@@ -2148,7 +2148,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         mediaIds: mediaFilenames,
         userEmail: requestedBy,
         eventName: event.event_name || 'your event',
-        eventId: event.id,
+        // Zipper-v2 bruker dette i søke-paths (originals/{eventId}/{mediaId}).
+        // GCS upload-stier bruker event.event_id (short form), ikke event.id (UUID).
+        // Holdes konsekvent for å finne v2-filene i bucket.
+        eventId: event.event_id,
       });
     } catch (err) {
       console.error('Zipper v2 call failed:', err);
