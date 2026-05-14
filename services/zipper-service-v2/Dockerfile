@@ -23,4 +23,8 @@ RUN npm ci --omit=dev && npm cache clean --force
 ENV NODE_ENV=production
 ENV PORT=8080
 
-CMD ["node", "dist/index.js"]
+# Entry-script velger mode:
+#   JOB_MODE=true → batch-prosess (Cloud Run Job execution)
+#   ellers        → HTTP-server (Cloud Run Service)
+# Begge bygges av samme image — én Dockerfile, to deploy-targets.
+CMD ["sh","-c","if [ \"$JOB_MODE\" = \"true\" ]; then exec node dist/job.js; else exec node dist/index.js; fi"]

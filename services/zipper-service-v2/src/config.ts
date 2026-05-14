@@ -45,4 +45,33 @@ export const config = {
   filePerStreamTimeoutMs: parseInt(process.env.FILE_TIMEOUT_MS || '60000', 10),
 
   port: parseInt(process.env.PORT || '8080', 10),
+
+  // ===== Cloud Run Jobs (ny path for store ZIPs) =====
+  //
+  // ZIP_BACKEND velger flyten:
+  //   'tasks' (default): /zip → Cloud Tasks → /process-zip (samme container, hard
+  //                      30-min Cloud Tasks-deadline)
+  //   'jobs'           : /zip → Cloud Tasks → /start-job → runJob() (egen Cloud Run Job
+  //                      execution, opp til 12t per task)
+  //
+  // Vi beholder Cloud Tasks i Jobs-modus FORDI det fungerer som throttling-lag:
+  // /start-job sjekker antall aktive Job-executions og returnerer 503 hvis over
+  // grensen. Cloud Tasks retry-er da med backoff, slik at trafikk-spikes naturlig
+  // venter i stedet for å overbelaste systemet.
+  zipBackend: (process.env.ZIP_BACKEND === 'jobs' ? 'jobs' : 'tasks') as 'jobs' | 'tasks',
+
+  // Job-config — kun nødvendig når ZIP_BACKEND=jobs.
+  // jobName er miljø-spesifikk (zipper-job vs zipper-job-staging).
+  jobName: process.env.JOB_NAME || '',
+  jobLocation: process.env.JOB_LOCATION || 'europe-north1',
+
+  // Concurrency-grense for samtidige Cloud Run Job-executions.
+  // /start-job sjekker eksisterende Job-executions og returnerer 503 hvis over
+  // denne grensen → Cloud Tasks retry-er. Naturlig back-pressure.
+  // 10 er en konservativ default — kan justeres opp ved behov.
+  maxConcurrentJobExecutions: parseInt(process.env.MAX_CONCURRENT_JOB_EXECUTIONS || '10', 10),
+
+  // Hvor lenge en Job-execution maksimalt får kjøre før Cloud Run avslutter den.
+  // Sett i Job-config (--task-timeout); duplikat her for log/diagnostikk-synlighet.
+  jobTaskTimeoutSec: parseInt(process.env.JOB_TASK_TIMEOUT_SEC || '43200', 10),
 };

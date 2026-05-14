@@ -22,7 +22,7 @@ steps:
       - push
       - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/zipper-service-v2:latest
 
-  - id: deploy
+  - id: deploy-service
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
@@ -33,7 +33,11 @@ steps:
       - --region=europe-north1
       - --project=${PROJECT_ID}
       - --service-account=prod-runner@${PROJECT_ID}.iam.gserviceaccount.com
-      - --set-env-vars=GCS_BUCKET_NAME=evenero-cloud,GCP_PROJECT_ID=${PROJECT_ID},QUEUE_LOCATION=europe-west1,QUEUE_NAME=zip-queue-v2-prod,WORKER_SERVICE_ACCOUNT=prod-runner@${PROJECT_ID}.iam.gserviceaccount.com,SERVICE_URL=https://zipper-service-v2-467452422363.europe-north1.run.app,WEBHOOK_URL=https://main-api-467452422363.europe-north1.run.app/api/zip-ready
+      # ZIP_BACKEND default = tasks (eksisterende flyt). For å aktivere
+      # Cloud Run Jobs-flyt: `gcloud run services update zipper-service-v2
+      # --update-env-vars=ZIP_BACKEND=jobs --region=europe-north1`. Instant rollback
+      # ved å sette tilbake til tasks. JOB_NAME peker på Cloud Run Job nedenfor.
+      - --set-env-vars=GCS_BUCKET_NAME=evenero-cloud,GCP_PROJECT_ID=${PROJECT_ID},QUEUE_LOCATION=europe-west1,QUEUE_NAME=zip-queue-v2-prod,WORKER_SERVICE_ACCOUNT=prod-runner@${PROJECT_ID}.iam.gserviceaccount.com,SERVICE_URL=https://zipper-service-v2-467452422363.europe-north1.run.app,WEBHOOK_URL=https://main-api-467452422363.europe-north1.run.app/api/zip-ready,ZIP_BACKEND=tasks,JOB_NAME=zipper-job,JOB_LOCATION=europe-north1,MAX_CONCURRENT_JOB_EXECUTIONS=10
       - --set-secrets=WEBHOOK_API_KEY=prod-webhook-api-key:latest
       - --memory=512Mi
       - --cpu=1
@@ -42,6 +46,30 @@ steps:
       - --min-instances=0
       - --timeout=3600s
       - --allow-unauthenticated
+      - --quiet
+
+  # Cloud Run Job — kjører i Job-mode (JOB_MODE=true) for langvarig ZIP-prosessering
+  # uten Cloud Tasks 30-min-deadline. Bruker samme container-image som Service-en.
+  # task-timeout=12t gir komfortabel margin for 100+ GB ZIPs (lineær: ~13 MB/s).
+  # 2 vCPU + 2 GiB for raskere arkivering. max-retries=3 for transient feil.
+  - id: deploy-job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - deploy
+      - zipper-job
+      - --image=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/zipper-service-v2:${SHORT_SHA}
+      - --region=europe-north1
+      - --project=${PROJECT_ID}
+      - --service-account=prod-runner@${PROJECT_ID}.iam.gserviceaccount.com
+      - --set-env-vars=GCS_BUCKET_NAME=evenero-cloud,GCP_PROJECT_ID=${PROJECT_ID},WEBHOOK_URL=https://main-api-467452422363.europe-north1.run.app/api/zip-ready,JOB_MODE=true,QUEUE_NAME=unused-in-job-mode,SERVICE_URL=unused-in-job-mode,WORKER_SERVICE_ACCOUNT=unused-in-job-mode
+      - --set-secrets=WEBHOOK_API_KEY=prod-webhook-api-key:latest
+      - --memory=2Gi
+      - --cpu=2
+      - --max-retries=3
+      - --task-timeout=43200s
       - --quiet
 
 options:
