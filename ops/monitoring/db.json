@@ -1,0 +1,22 @@
+{
+  "displayName": "Cloud SQL connection-feil — prod main-api eller web-api",
+  "documentation": {
+    "content": "Backend rapporterer DB-tilkoblings-feil (connection refused, timeout, auth-feil). Hele app-en er antagelig nede inntil dette er fikset.\n\nVanlige årsaker:\n- Cloud SQL Auth Proxy ikke konfigurert riktig på Cloud Run\n- DB ute av plass\n- IAM-bruker for prod-runner mangler tilgang\n- DB-instans pauset/slettet ved et uhell\n\nSjekk Cloud SQL-konsollen for instans-status og Cloud Run-logs for full stack trace.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "DB connection-feil i prod Cloud Run-log",
+      "conditionMatchedLog": {
+        "filter": "resource.type=\"cloud_run_revision\" AND (resource.labels.service_name=\"main-api\" OR resource.labels.service_name=\"web-api\") AND severity>=ERROR AND (textPayload:\"ECONNREFUSED\" OR textPayload:\"ETIMEDOUT\" OR textPayload:\"database connection\" OR textPayload:\"Cloud SQL\" OR jsonPayload.message:\"connection refused\" OR jsonPayload.message:\"password authentication failed\" OR textPayload:\"password authentication failed\")"
+      }
+    }
+  ],
+  "alertStrategy": {
+    "notificationRateLimit": { "period": "600s" },
+    "autoClose": "1800s"
+  },
+  "notificationChannels": ["projects/evenero/notificationChannels/17116521427358004824"],
+  "enabled": true
+}

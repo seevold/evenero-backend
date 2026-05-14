@@ -1,0 +1,22 @@
+{
+  "displayName": "Cloud Run container crash — prod startup eller runtime",
+  "documentation": {
+    "content": "En prod Cloud Run-container krasjet ved oppstart eller runtime (non-zero exit, fail-to-start, eller readiness-probe-feil). User-affecting hvis revisjonen ikke blir ready: trafikk fortsetter mot forrige revision (Cloud Run rollback automatisk), men nye deploys av samme bygg vil feile.\n\nVanlig årsak: missing env-var (fail-fast throw), eller exception under app init. Sjekk Cloud Run-logs for berørt service.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "Container failed to start eller exit non-zero",
+      "conditionMatchedLog": {
+        "filter": "resource.type=\"cloud_run_revision\" AND (resource.labels.service_name=\"main-api\" OR resource.labels.service_name=\"web-api\" OR resource.labels.service_name=\"zipper-service-v2\" OR resource.labels.service_name=\"image-processor-v2\" OR resource.labels.service_name=\"video-processor-v2\") AND (textPayload:\"Container called exit\" OR textPayload:\"failed to start\" OR textPayload:\"container failed\" OR jsonPayload.message:\"Container called exit\")"
+      }
+    }
+  ],
+  "alertStrategy": {
+    "notificationRateLimit": { "period": "300s" },
+    "autoClose": "1800s"
+  },
+  "notificationChannels": ["projects/evenero/notificationChannels/17116521427358004824"],
+  "enabled": true
+}

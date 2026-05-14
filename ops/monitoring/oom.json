@@ -1,0 +1,22 @@
+{
+  "displayName": "Cloud Run OOM — prod-services drept for memory limit",
+  "documentation": {
+    "content": "Cloud Run-container ble drept fordi det forsøkte å bruke mer minne enn limit (OOM-kill). Direkte user-affecting: requests under påvirkning får 500 og containeren restarter. Sjekk Cloud Run-logs for berørt service og revision; vurder å øke memory-limit på Cloud Run-servicen.\n\nKun prod-services trigger denne alerten — staging OOM under testing skal ikke vekke deg.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "Memory limit exceeded i prod Cloud Run-log",
+      "conditionMatchedLog": {
+        "filter": "resource.type=\"cloud_run_revision\" AND (resource.labels.service_name=\"main-api\" OR resource.labels.service_name=\"web-api\" OR resource.labels.service_name=\"zipper-service-v2\" OR resource.labels.service_name=\"image-processor-v2\" OR resource.labels.service_name=\"video-processor-v2\") AND (textPayload:\"Memory limit\" OR textPayload:\"exceeded its memory limit\" OR severity>=ERROR AND textPayload:\"OOM\")"
+      }
+    }
+  ],
+  "alertStrategy": {
+    "notificationRateLimit": { "period": "300s" },
+    "autoClose": "1800s"
+  },
+  "notificationChannels": ["projects/evenero/notificationChannels/17116521427358004824"],
+  "enabled": true
+}

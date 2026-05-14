@@ -1,0 +1,55 @@
+{
+  "displayName": "Cloud Run 5xx-rate høy — prod main-api eller web-api",
+  "documentation": {
+    "content": "Server-feil-rate (5xx) er over 5% for sustained 5 minutter. Indikerer bug i ny deploy, DB-problem, downstream-service-feil eller lignende. Sjekk Cloud Run-logs og siste deployment.\n\nThreshold er bevisst hevet (5% over 5 min) for å unngå støy fra sporadiske retry-feil. Bygger ikke alarm hvis trafikkvolumet er for lavt.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "main-api: 5xx ratio > 5% over 5 min",
+      "conditionThreshold": {
+        "filter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"main-api\" AND metric.type=\"run.googleapis.com/request_count\" AND metric.label.response_code_class=\"5xx\"",
+        "aggregations": [{
+          "alignmentPeriod": "300s",
+          "perSeriesAligner": "ALIGN_RATE",
+          "crossSeriesReducer": "REDUCE_SUM"
+        }],
+        "denominatorFilter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"main-api\" AND metric.type=\"run.googleapis.com/request_count\"",
+        "denominatorAggregations": [{
+          "alignmentPeriod": "300s",
+          "perSeriesAligner": "ALIGN_RATE",
+          "crossSeriesReducer": "REDUCE_SUM"
+        }],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0.05,
+        "duration": "300s",
+        "trigger": { "count": 1 }
+      }
+    },
+    {
+      "displayName": "web-api: 5xx ratio > 5% over 5 min",
+      "conditionThreshold": {
+        "filter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"web-api\" AND metric.type=\"run.googleapis.com/request_count\" AND metric.label.response_code_class=\"5xx\"",
+        "aggregations": [{
+          "alignmentPeriod": "300s",
+          "perSeriesAligner": "ALIGN_RATE",
+          "crossSeriesReducer": "REDUCE_SUM"
+        }],
+        "denominatorFilter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"web-api\" AND metric.type=\"run.googleapis.com/request_count\"",
+        "denominatorAggregations": [{
+          "alignmentPeriod": "300s",
+          "perSeriesAligner": "ALIGN_RATE",
+          "crossSeriesReducer": "REDUCE_SUM"
+        }],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0.05,
+        "duration": "300s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "alertStrategy": { "autoClose": "1800s" },
+  "notificationChannels": ["projects/evenero/notificationChannels/17116521427358004824"],
+  "enabled": true
+}
