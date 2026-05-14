@@ -1,0 +1,21 @@
+{
+  "displayName": "evenero-web frontend (Vercel)",
+  "monitoredResource": {
+    "type": "uptime_url",
+    "labels": {
+      "host": "evenero-web.vercel.app",
+      "project_id": "evenero"
+    }
+  },
+  "httpCheck": {
+    "path": "/",
+    "port": 443,
+    "useSsl": true,
+    "validateSsl": true,
+    "requestMethod": "GET",
+    "acceptedResponseStatusCodes": [{ "statusClass": "STATUS_CLASS_2XX" }]
+  },
+  "period": "300s",
+  "timeout": "10s",
+  "selectedRegions": ["EUROPE", "USA", "ASIA_PACIFIC"]
+}

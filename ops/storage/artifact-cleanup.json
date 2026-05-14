@@ -1,0 +1,25 @@
+[
+  {
+    "name": "keep-latest-and-recent-shas",
+    "action": { "type": "Keep" },
+    "condition": {
+      "tagState": "TAGGED",
+      "tagPrefixes": ["latest"]
+    }
+  },
+  {
+    "name": "keep-recent-5-versions-per-package",
+    "action": { "type": "Keep" },
+    "mostRecentVersions": {
+      "keepCount": 5
+    }
+  },
+  {
+    "name": "delete-old-untagged-versions",
+    "action": { "type": "Delete" },
+    "condition": {
+      "tagState": "UNTAGGED",
+      "olderThan": "604800s"
+    }
+  }
+]

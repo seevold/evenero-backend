@@ -1,0 +1,29 @@
+{
+  "displayName": "Uptime check failure — prod (main-api, web-api, evenero-app, evenero-web)",
+  "documentation": {
+    "content": "En av de 4 prod-endpointene returnerer ikke 2xx fra Googles eksterne sondering. Hvis dette ikke er en falsk-positiv fra DNS-glitch et sted: app-en er nede for noen brukere.\n\nSjekk:\n1. Cloud Run-service status i konsollen (er den 'serving'?)\n2. Cloud Run revision logs for siste 5 min\n3. Vercel build/deploy status for frontend-domener\n\nTrigger: minst 2 av 3 globale regioner rapporterer feil i 2 sammenhengende 5-min-vinduer.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "Uptime check feiler i 2+ regioner",
+      "conditionThreshold": {
+        "filter": "metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND resource.type=\"uptime_url\"",
+        "aggregations": [{
+          "alignmentPeriod": "300s",
+          "perSeriesAligner": "ALIGN_NEXT_OLDER",
+          "crossSeriesReducer": "REDUCE_COUNT_FALSE",
+          "groupByFields": ["resource.label.host"]
+        }],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 1,
+        "duration": "300s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "alertStrategy": { "autoClose": "1800s" },
+  "notificationChannels": ["projects/evenero/notificationChannels/17116521427358004824"],
+  "enabled": true
+}
