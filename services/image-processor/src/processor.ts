@@ -1,5 +1,29 @@
 import sharp from 'sharp';
+// @ts-ignore — heic-convert mangler types, men API er rett-frem
+import convert from 'heic-convert';
 import { config } from './config.js';
+
+// HEIC-magic-bytes detection. iPhone-HEIC og PC-HEIF har samme ISO BMFF-container.
+// Byte 4-12 inneholder "ftypheic", "ftypheix", "ftypmif1", "ftypmsf1", "ftyphevc" osv.
+function isHeic(buf: Buffer): boolean {
+  if (buf.byteLength < 12) return false;
+  const ftyp = buf.subarray(4, 8).toString('ascii');
+  if (ftyp !== 'ftyp') return false;
+  const brand = buf.subarray(8, 12).toString('ascii');
+  return ['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1'].includes(brand);
+}
+
+// Konverter HEIC → JPEG-buffer som Sharp kan lese.
+// Sharps bundled libvips mangler HEVC-decoder plugin ('No decoding plugin'-feil)
+// så vi pre-prosesserer alle HEIC før Sharp ser dem.
+async function heicToJpeg(input: Buffer): Promise<Buffer> {
+  const jpegArrayBuffer = await convert({
+    buffer: input as unknown as ArrayBuffer,
+    format: 'JPEG',
+    quality: 0.92,
+  });
+  return Buffer.from(jpegArrayBuffer);
+}
 
 export type Variant = {
   name: 'thumb' | 'medium';
@@ -28,9 +52,18 @@ export async function processImage(input: Buffer): Promise<ProcessResult> {
     throw new Error(`Input too large: ${input.byteLength} > ${config.maxInputBytes}`);
   }
 
+  // Pre-konvertering hvis HEIC/HEIF (Sharp's libvips mangler HEVC-decoder).
+  // heic-convert er WASM-basert og funker uten native deps.
+  let working = input;
+  if (isHeic(input)) {
+    console.log(`[HEIC] pre-konverterer ${input.byteLength} bytes til JPEG før Sharp`);
+    working = await heicToJpeg(input);
+    console.log(`[HEIC] → JPEG ${working.byteLength} bytes (${Math.round(working.byteLength / input.byteLength * 100)}% av original)`);
+  }
+
   // failOn: 'truncated' = aksepter mindre EXIF-feil, men avvis korrupte bilder.
   // .rotate() = auto-rotér basert på EXIF Orientation, FØR vi stripper metadata.
-  const base = sharp(input, { failOn: 'truncated', limitInputPixels: 268_402_689 }).rotate();
+  const base = sharp(working, { failOn: 'truncated', limitInputPixels: 268_402_689 }).rotate();
 
   const meta = await base.metadata();
 

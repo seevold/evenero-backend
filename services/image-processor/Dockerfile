@@ -19,7 +19,8 @@ FROM node:20-slim
 WORKDIR /app
 
 # sharp har native deps via libvips (inkludert i prebuilt binary).
-# Ingen ekstra apt-packages nødvendig for JPEG/PNG/WebP/HEIC.
+# Ingen ekstra apt-packages nødvendig for JPEG/PNG/WebP.
+# HEIC håndteres av heic-convert (WASM, ingen native deps).
 
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/dist ./dist
