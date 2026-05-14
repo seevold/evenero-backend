@@ -2,9 +2,12 @@ import { Storage, type File } from '@google-cloud/storage';
 import archiver from 'archiver';
 import crypto from 'node:crypto';
 import { config } from './config.js';
+import { getOutputBackend } from './storage/factory.js';
 
-const storage = new Storage();
-const bucket = storage.bucket(config.bucket);
+// Input-bucket (originals) er ALLTID GCS — uavhengig av hvor output ZIP havner.
+// Cloud Run + GCS i samme region = $0 read-egress.
+const inputStorage = new Storage();
+const inputBucket = inputStorage.bucket(config.bucket);
 
 function cleanName(s: string): string {
   return s.replace(/[^a-zA-Z0-9\s_-]/g, '').replace(/\s+/g, '_').substring(0, 50).trim();
@@ -25,7 +28,7 @@ async function resolveMediaFile(
   const id = String(rawId).replace(/^(images\/|\/images\/|\/)/, '');
   for (const tmpl of config.searchPathTemplates) {
     const path = tmpl.replace('{eventId}', eventId).replace('{mediaId}', id);
-    const file = bucket.file(path);
+    const file = inputBucket.file(path);
     try {
       const [exists] = await file.exists();
       if (exists) return file;
@@ -44,6 +47,7 @@ export type ZipResult = {
   skipped: number;
   errors: string[];
   processingTimeMs: number;
+  outputBackend: 'gcs' | 'r2';
 };
 
 export async function buildZip(
@@ -55,20 +59,13 @@ export async function buildZip(
 ): Promise<ZipResult> {
   const started = Date.now();
   const zipObjectName = `${config.zipPrefix}${zipFileName}`;
-  const zipFile = bucket.file(zipObjectName);
+  const backend = getOutputBackend();
 
-  const writeStream = zipFile.createWriteStream({
-    metadata: {
-      contentType: 'application/zip',
-      metadata: {
-        eventId,
-        eventName: cleanName(eventName),
-        jobId,
-        createdAt: new Date().toISOString(),
-      },
-    },
-    resumable: false,
-  });
+  // Start streaming upload mot valgt backend (GCS eller R2).
+  const { stream: writeStream, completion: uploadCompletion } = backend.createUpload(
+    zipObjectName,
+    'application/zip',
+  );
 
   const archive = archiver('zip', {
     zlib: { level: 0 }, // Store-only — JPEG/MP4 er allerede komprimert.
@@ -77,7 +74,7 @@ export async function buildZip(
 
   archive.on('warning', (err) => console.warn('Archive warning:', err.message));
 
-  // Pipe — feil håndteres på finale-promise.
+  // Pipe — feil håndteres på finale-promise (uploadCompletion).
   archive.pipe(writeStream);
 
   let processed = 0;
@@ -141,21 +138,14 @@ export async function buildZip(
     throw new Error('No files found to add to ZIP');
   }
 
-  // Finalize archive, så vent til GCS-upload er ferdig.
+  // Finalize archive — closes archiver-stream → trigger upload-finalize.
   await archive.finalize();
-  await new Promise<void>((resolve, reject) => {
-    writeStream.on('finish', resolve);
-    writeStream.on('error', reject);
-  });
+  // Vent på at uploaden faktisk er committed til storage (GCS finish eller
+  // R2 multipart-complete).
+  await uploadCompletion;
 
-  const [metadata] = await zipFile.getMetadata();
-  const sizeBytes = parseInt(String(metadata.size ?? '0'), 10);
-
-  const [signedUrl] = await zipFile.getSignedUrl({
-    version: 'v4',
-    action: 'read',
-    expires: Date.now() + config.signedUrlExpiryDays * 24 * 60 * 60 * 1000,
-  });
+  const sizeBytes = await backend.getObjectSize(zipObjectName);
+  const signedUrl = await backend.getSignedUrl(zipObjectName, config.signedUrlExpiryDays);
 
   return {
     zipPath: zipObjectName,
@@ -165,5 +155,6 @@ export async function buildZip(
     skipped,
     errors,
     processingTimeMs: Date.now() - started,
+    outputBackend: backend.kind,
   };
 }

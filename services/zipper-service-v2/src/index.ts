@@ -183,6 +183,7 @@ app.post('/process-zip', async (req, res) => {
     skippedCount: result.skipped,
     sizeMB: Math.round((result.sizeBytes / 1024 / 1024) * 10) / 10,
     processingTimeSeconds: Math.round(result.processingTimeMs / 1000),
+    outputBackend: result.outputBackend,
     errors: result.errors.length > 0 ? result.errors.slice(0, 10) : undefined,
   }).catch((e) => console.warn('webhook failed:', e));
 
@@ -277,6 +278,8 @@ const server = app.listen(config.port, () => {
     serviceUrl: config.serviceUrl,
     searchPaths: config.searchPathTemplates,
     zipBackend: config.zipBackend,
+    zipOutput: config.zipOutput,
+    r2Bucket: config.r2.bucket || null,
     jobName: config.jobName,
     maxConcurrentJobs: config.maxConcurrentJobExecutions,
   }));

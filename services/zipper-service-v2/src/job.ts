@@ -111,6 +111,7 @@ async function main(): Promise<void> {
     skippedCount: result.skipped,
     sizeMB: Math.round((result.sizeBytes / 1024 / 1024) * 10) / 10,
     processingTimeSeconds: Math.round(result.processingTimeMs / 1000),
+    outputBackend: result.outputBackend,
     errors: result.errors.length > 0 ? result.errors.slice(0, 10) : undefined,
   }).catch((e) => console.warn('webhook fail:', e));
 

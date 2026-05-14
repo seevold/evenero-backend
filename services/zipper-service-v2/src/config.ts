@@ -74,4 +74,25 @@ export const config = {
   // Hvor lenge en Job-execution maksimalt får kjøre før Cloud Run avslutter den.
   // Sett i Job-config (--task-timeout); duplikat her for log/diagnostikk-synlighet.
   jobTaskTimeoutSec: parseInt(process.env.JOB_TASK_TIMEOUT_SEC || '43200', 10),
+
+  // ===== Output-storage backend (Cloudflare R2 vs GCS) =====
+  //
+  // ZIP_OUTPUT velger hvor ferdige ZIP-filer havner + hvor signed URL peker.
+  //   'gcs' (default): skriv til GCS bucket (samme som i dag, $0.12/GB egress)
+  //   'r2'          : skriv til Cloudflare R2 ($0 egress når kunde laster ned)
+  //
+  // Migrering: deploy med default 'gcs' → flip til 'r2' via env-var update på
+  // både Service og Job. Rollback = sett tilbake til 'gcs'.
+  zipOutput: (process.env.ZIP_OUTPUT === 'r2' ? 'r2' : 'gcs') as 'r2' | 'gcs',
+
+  // R2-credentials. Kun nødvendig når ZIP_OUTPUT=r2.
+  // accountId er en del av R2-endpoint-URLen (`https://{accountId}.r2.cloudflarestorage.com`).
+  // accessKeyId + secretAccessKey kommer fra R2 API token.
+  // bucket = navn på R2-bucket (f.eks. 'evenero-zips-prod').
+  r2: {
+    accountId: process.env.R2_ACCOUNT_ID || '',
+    accessKeyId: process.env.R2_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || '',
+    bucket: process.env.R2_BUCKET || '',
+  },
 };
