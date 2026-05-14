@@ -2207,6 +2207,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // som SEPARATE filer, ikke som image_url-verdi). Vi bruker siste path-segment som mediaId
   // — zipper-v2 prøver det mot både originals/ og images/ via SEARCH_PATH_TEMPLATES.
   // _small/_compressed-stripping er en safety net hvis en eldre rad ved et uhell peker på derivat.
+  //
+  // GCS-filer er lagret med decoded filnavn (Å, mellomrom, parens), men image_url
+  // i DB er URL-encoded. Uten decodeURIComponent finner zipper ikke gamle filer
+  // med spesialtegn — de blir silent dropped som "Not found" i ZIP-en.
   function extractMediaFilenames(mediaObjects: EventImage[]): string[] {
     return mediaObjects.map(media => {
       const url = media.image_url;
@@ -2214,7 +2218,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const noQuery = url.split('?')[0];
       const lastSegment = noQuery.split('/').pop();
       if (!lastSegment) return null;
-      return lastSegment
+      let decoded: string;
+      try {
+        decoded = decodeURIComponent(lastSegment);
+      } catch {
+        // Malformed encoding — bruk rå segment, zipper får dummy 404 i verste fall.
+        decoded = lastSegment;
+      }
+      return decoded
         .replace(/_small(\.[^.]+)$/, '$1')
         .replace(/_compressed(\.[^.]+)$/, '$1');
     }).filter((v): v is string => !!v && v.length > 0);
