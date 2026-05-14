@@ -2239,9 +2239,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return { kind: 'error', status: 500, detail: 'Server misconfigured' };
     }
 
-    // For full-event scope, reuse any non-expired completed/pending 'all' job
+    // For full-event scope, reuse en non-expired completed 'all' job KUN
+    // hvis filtellingen matcher dagens mediaObjects.length. Uten denne
+    // file_count-sjekken ville en gammel ZIP fra før nye uploads bli foreslått
+    // som reuse — utdatert ZIP. Pending håndteres senere via 'busy'.
     if (scope === 'all') {
-      const reusable = await storage.getReusableAllZipJobForEvent(event.id);
+      const reusable = await storage.getReusableAllZipJobForEvent(event.id, mediaObjects.length);
       if (reusable) {
         return { kind: 'reused', job: reusable };
       }

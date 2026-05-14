@@ -150,7 +150,7 @@ export interface IStorage {
   createZipJob(job: InsertZipJob): Promise<ZipJob>;
   getZipJob(jobId: string): Promise<ZipJob | undefined>;
   getActiveZipJobForEvent(eventId: string): Promise<ZipJob | undefined>;
-  getReusableAllZipJobForEvent(eventId: string): Promise<ZipJob | undefined>;
+  getReusableAllZipJobForEvent(eventId: string, expectedFileCount?: number): Promise<ZipJob | undefined>;
   listZipJobsForEvent(eventId: string, limit?: number): Promise<ZipJob[]>;
   updateZipJobOnCompletion(jobId: string, updates: { status: 'completed' | 'failed'; signed_url?: string | null; file_count?: number | null; size_mb?: number | null; expires_at?: Date | null; error?: string | null }): Promise<ZipJob | undefined>;
 }
@@ -1534,18 +1534,25 @@ export class PostgreSQLStorage implements IStorage {
     return job;
   }
 
-  async getReusableAllZipJobForEvent(eventId: string): Promise<ZipJob | undefined> {
+  async getReusableAllZipJobForEvent(eventId: string, expectedFileCount?: number): Promise<ZipJob | undefined> {
     const now = new Date();
+    // Reuse er kun gyldig for completed-not-expired jobs der filtellingen
+    // matcher dagens media-set. Uten file_count-sjekk ville gammel ZIP fra
+    // før nye uploads bli foreslått som "use existing" — utdatert ZIP.
+    // Pending jobs håndteres separat via getActiveZipJobForEvent (returnerer
+    // 'busy', ikke 'reused').
+    const conditions = [
+      eq(zip_jobs.event_id, eventId),
+      eq(zip_jobs.scope, 'all'),
+      eq(zip_jobs.status, 'completed' as any),
+      gte(zip_jobs.expires_at, now),
+    ];
+    if (expectedFileCount !== undefined) {
+      conditions.push(eq(zip_jobs.file_count, expectedFileCount));
+    }
     const [job] = await db.select()
       .from(zip_jobs)
-      .where(and(
-        eq(zip_jobs.event_id, eventId),
-        eq(zip_jobs.scope, 'all'),
-        or(
-          eq(zip_jobs.status, 'pending'),
-          and(eq(zip_jobs.status, 'completed'), gte(zip_jobs.expires_at, now))
-        )
-      ))
+      .where(and(...conditions))
       .orderBy(desc(zip_jobs.created_at))
       .limit(1);
     return job;
