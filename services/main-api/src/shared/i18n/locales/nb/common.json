@@ -1,7 +1,7 @@
 {
   "app": {
     "name": "Evenero",
-    "tagline": "Samle og del minner fra arrangementer"
+    "tagline": "Samle og del minner fra eventer"
   },
   "nav": {
     "dashboard": "Oversikt",
@@ -127,8 +127,8 @@
   },
   "header": {
     "myAccount": "Min konto",
-    "events": "Arrangementer",
-    "buyEvent": "Kjøp arrangement",
+    "events": "Eventer",
+    "buyEvent": "Kjøp event",
     "loggedOut": "Logget ut",
     "loggedOutDescription": "Du har blitt logget ut."
   },
@@ -139,7 +139,7 @@
     "namePlaceholder": "Skriv inn ditt navn",
     "email": "E-post",
     "credits": "Kreditter",
-    "creditsRemaining": "arrangement-kreditter gjenstår",
+    "creditsRemaining": "event-kreditter gjenstår",
     "buyMoreCredits": "Kjøp flere kreditter",
     "saveChanges": "Lagre endringer"
   },

@@ -23,12 +23,12 @@
     "eyebrow": "Invitasjon",
     "title": "Du er invitert som medvert",
     "body": "{{inviterName}} vil ha deg med på laget for {{eventName}}.",
-    "description": "Som medvert kan du være med på å administrere arrangementet og samlingen av bilder og videoer.",
+    "description": "Som medvert kan du være med på å administrere eventet og samlingen av bilder og videoer.",
     "permissions": "Som medvert kan du:",
-    "permissionsList": "Godkjenne eller fjerne opplastinger\nEndre arrangementsinnstillinger\nLaste ned hele bildesamlingen\nStarte lysbildefremvisning på storskjerm",
+    "permissionsList": "Godkjenne eller fjerne opplastinger\nEndre eventinnstillinger\nLaste ned hele bildesamlingen\nStarte lysbildefremvisning på storskjerm",
     "acceptButton": "Logg inn for å administrere",
     "viewGalleryLink": "Eller åpne galleriet uten å logge inn",
-    "dashboardNote": "Etter innlogging finner du arrangementet på dashbordet ditt.",
+    "dashboardNote": "Etter innlogging finner du eventet på dashbordet ditt.",
     "ignore": "Kjenner du ikke avsenderen? Bare se bort fra denne e-posten."
   },
   "eventReminder": {
@@ -37,7 +37,7 @@
     "eyebrow": "Påminnelse",
     "title": "Klar til å dele minnene?",
     "body": "Du satte en påminnelse om å laste opp bilder fra {{eventName}}. Galleriet venter på deg.",
-    "uploadPrompt": "Bidra med dine bilder og videoer slik at alle får oppleve hele arrangementet.",
+    "uploadPrompt": "Bidra med dine bilder og videoer slik at alle får oppleve hele eventet.",
     "viewOthers": "Se også hva andre allerede har delt — kanskje du oppdager øyeblikk du gikk glipp av.",
     "viewGallery": "Åpne galleriet",
     "galleryLink": "Gallerilenke:",
@@ -72,7 +72,7 @@
     "getStarted": "Kom i gang",
     "features": {
       "title": "Hva du kan gjøre:",
-      "create": "Opprett arrangementer for bryllup, fester og mer",
+      "create": "Opprett eventer for bryllup, fester og mer",
       "collect": "Samle bilder fra alle gjestene dine",
       "share": "Del vakre gallerier med alle"
     }
