@@ -11,10 +11,17 @@ if (!process.env.STRIPE_SECRET_KEY) {
 }
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-const STRIPE_PRODUCT_ID = process.env.STRIPE_PRODUCT_ID || 'prod_SOyk4pHGl1dzjN';
+// STRIPE_PRODUCT_ID settes per Cloud Run-service. Live-product i prod,
+// test-product i staging. Fail-fast: tidligere defaultet vi til live
+// product-ID, som ville koble staging til ekte Stripe-betalinger hvis env-
+// varen ble fjernet ved et uhell.
 if (!process.env.STRIPE_PRODUCT_ID) {
-  console.warn('[stripe] STRIPE_PRODUCT_ID env-var ikke satt, faller tilbake til live product-ID — feiler i test mode');
+  throw new Error(
+    'STRIPE_PRODUCT_ID er ikke satt. Sett env-var per Cloud Run-service: ' +
+    'prod=live Stripe product-ID, staging=test Stripe product-ID.'
+  );
 }
+const STRIPE_PRODUCT_ID = process.env.STRIPE_PRODUCT_ID;
 const PRICE_CACHE_TTL = 5 * 60 * 1000;
 
 interface PriceCacheEntry {

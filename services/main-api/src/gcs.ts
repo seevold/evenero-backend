@@ -10,7 +10,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Google Cloud Storage configuration
-const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME || 'evenero-cloud';
+//
+// Fail-fast: GCS_BUCKET_NAME MÅ settes per Cloud Run-service. Ingen fallback
+// — tidligere defaultet vi til 'evenero-cloud' (prod-bucket), som ville
+// silent rute staging-skriv til prod hvis env-varen ble fjernet ved et uhell.
+if (!process.env.GCS_BUCKET_NAME) {
+  throw new Error(
+    "GCS_BUCKET_NAME er ikke satt. Sett env-var per Cloud Run-service: " +
+    "prod=evenero-cloud, staging=evenero-staging-cloud."
+  );
+}
+const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME;
 
 let storage: Storage | null = null;
 

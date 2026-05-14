@@ -8,9 +8,12 @@ export const config = {
   bucket: required('GCS_BUCKET_NAME'),
   projectId: required('GCP_PROJECT_ID'),
 
-  // Cloud Tasks
+  // Cloud Tasks. queueLocation har en safe default (begge miljø bruker
+  // europe-west1, eneste EU-region som støtter Cloud Tasks). queueName er
+  // miljø-spesifikk (zip-queue-v2-prod vs zip-queue-v2-staging) — fail-fast
+  // så vi aldri silent skriver til feil miljø.
   queueLocation: process.env.QUEUE_LOCATION || 'europe-west1',
-  queueName: process.env.QUEUE_NAME || 'zip-queue-v2-staging',
+  queueName: required('QUEUE_NAME'),
 
   // Service-URL — settes etter første deploy. Cloud Tasks må vite hvor /process-zip ligger.
   serviceUrl: required('SERVICE_URL'),
