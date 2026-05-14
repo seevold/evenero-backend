@@ -26,6 +26,16 @@ export interface R2BackendConfig {
   accessKeyId: string;
   secretAccessKey: string;
   bucket: string;
+  /**
+   * Cloudflare R2 jurisdiksjon. Bestemmer subdomenet på endpoint-URLen:
+   *   undefined / ''  → default global: https://{accountId}.r2.cloudflarestorage.com
+   *   'eu'            → EU jurisdiction: https://{accountId}.eu.r2.cloudflarestorage.com
+   *   'fedramp'       → FedRAMP: https://{accountId}.fedramp.r2.cloudflarestorage.com
+   *
+   * Buckets opprettet under en jurisdiksjon MÅ aksesseres via det matchende
+   * endpointet. Wrong endpoint → 404. Vi bruker EU for GDPR-compliance.
+   */
+  jurisdiction?: string;
 }
 
 const PART_SIZE_BYTES = 32 * 1024 * 1024; // 32 MB per multipart-del
@@ -39,9 +49,10 @@ export class R2Backend implements OutputBackend {
     if (!cfg.accountId || !cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) {
       throw new Error('R2Backend: missing one or more required config fields');
     }
+    const jurisdictionPrefix = cfg.jurisdiction ? `${cfg.jurisdiction}.` : '';
     this.client = new S3Client({
       region: 'auto',
-      endpoint: `https://${cfg.accountId}.r2.cloudflarestorage.com`,
+      endpoint: `https://${cfg.accountId}.${jurisdictionPrefix}r2.cloudflarestorage.com`,
       credentials: {
         accessKeyId: cfg.accessKeyId,
         secretAccessKey: cfg.secretAccessKey,

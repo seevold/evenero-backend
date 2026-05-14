@@ -94,5 +94,8 @@ export const config = {
     accessKeyId: process.env.R2_ACCESS_KEY_ID || '',
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || '',
     bucket: process.env.R2_BUCKET || '',
+    // R2 jurisdiction (default '' = global, 'eu' = EU GDPR-compliant).
+    // Buckets opprettet med EU jurisdiction krever 'eu' her ellers gir 404.
+    jurisdiction: process.env.R2_JURISDICTION || '',
   },
 };

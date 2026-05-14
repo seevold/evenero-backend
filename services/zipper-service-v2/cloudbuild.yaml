@@ -41,7 +41,7 @@ steps:
       # ZIP_OUTPUT default = gcs (skriv til GCS bucket). For å aktivere R2:
       # `--update-env-vars=ZIP_OUTPUT=r2 --region=europe-north1`. Krever at R2-
       # secrets + R2_ACCOUNT_ID/BUCKET er satt. Rollback = sett tilbake til gcs.
-      - --set-env-vars=^|^GCS_BUCKET_NAME=evenero-staging-cloud|GCP_PROJECT_ID=${PROJECT_ID}|QUEUE_LOCATION=europe-west1|QUEUE_NAME=zip-queue-v2-staging|WORKER_SERVICE_ACCOUNT=staging-runner@${PROJECT_ID}.iam.gserviceaccount.com|SERVICE_URL=https://zipper-service-v2-staging-467452422363.europe-north1.run.app|WEBHOOK_URL=https://main-api-staging-v7cr3xx5ca-lz.a.run.app/api/zip-ready|ZIP_BACKEND=tasks|JOB_NAME=zipper-job-staging|JOB_LOCATION=europe-north1|MAX_CONCURRENT_JOB_EXECUTIONS=10|ZIP_OUTPUT=gcs|R2_ACCOUNT_ID=|R2_BUCKET=evenero-zips-staging
+      - --set-env-vars=^|^GCS_BUCKET_NAME=evenero-staging-cloud|GCP_PROJECT_ID=${PROJECT_ID}|QUEUE_LOCATION=europe-west1|QUEUE_NAME=zip-queue-v2-staging|WORKER_SERVICE_ACCOUNT=staging-runner@${PROJECT_ID}.iam.gserviceaccount.com|SERVICE_URL=https://zipper-service-v2-staging-467452422363.europe-north1.run.app|WEBHOOK_URL=https://main-api-staging-v7cr3xx5ca-lz.a.run.app/api/zip-ready|ZIP_BACKEND=tasks|JOB_NAME=zipper-job-staging|JOB_LOCATION=europe-north1|MAX_CONCURRENT_JOB_EXECUTIONS=10|ZIP_OUTPUT=gcs|R2_ACCOUNT_ID=7a2a8934c6fbf8b8840aaa2bd8a0c46b|R2_BUCKET=evenero-zip-staging|R2_JURISDICTION=eu
       - --set-secrets=WEBHOOK_API_KEY=staging-webhook-api-key:latest,R2_ACCESS_KEY_ID=staging-r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=staging-r2-secret-access-key:latest
       - --memory=512Mi
       - --cpu=1
@@ -68,7 +68,7 @@ steps:
       - --region=europe-north1
       - --project=${PROJECT_ID}
       - --service-account=staging-runner@${PROJECT_ID}.iam.gserviceaccount.com
-      - --set-env-vars=^|^GCS_BUCKET_NAME=evenero-staging-cloud|GCP_PROJECT_ID=${PROJECT_ID}|WEBHOOK_URL=https://main-api-staging-v7cr3xx5ca-lz.a.run.app/api/zip-ready|JOB_MODE=true|QUEUE_NAME=unused-in-job-mode|SERVICE_URL=unused-in-job-mode|WORKER_SERVICE_ACCOUNT=unused-in-job-mode|ZIP_OUTPUT=gcs|R2_ACCOUNT_ID=|R2_BUCKET=evenero-zips-staging
+      - --set-env-vars=^|^GCS_BUCKET_NAME=evenero-staging-cloud|GCP_PROJECT_ID=${PROJECT_ID}|WEBHOOK_URL=https://main-api-staging-v7cr3xx5ca-lz.a.run.app/api/zip-ready|JOB_MODE=true|QUEUE_NAME=unused-in-job-mode|SERVICE_URL=unused-in-job-mode|WORKER_SERVICE_ACCOUNT=unused-in-job-mode|ZIP_OUTPUT=gcs|R2_ACCOUNT_ID=7a2a8934c6fbf8b8840aaa2bd8a0c46b|R2_BUCKET=evenero-zip-staging|R2_JURISDICTION=eu
       - --set-secrets=WEBHOOK_API_KEY=staging-webhook-api-key:latest,R2_ACCESS_KEY_ID=staging-r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=staging-r2-secret-access-key:latest
       - --memory=2Gi
       - --cpu=2

@@ -17,6 +17,7 @@ export function getOutputBackend(): OutputBackend {
       accessKeyId: config.r2.accessKeyId,
       secretAccessKey: config.r2.secretAccessKey,
       bucket: config.r2.bucket,
+      jurisdiction: config.r2.jurisdiction,
     });
   } else {
     cached = new GcsBackend(config.bucket);
