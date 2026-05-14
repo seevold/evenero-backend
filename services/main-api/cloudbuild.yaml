@@ -33,6 +33,7 @@ steps:
       - --image=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/main-api-staging:${SHORT_SHA}
       - --region=europe-north1
       - --project=${PROJECT_ID}
+      - --update-env-vars=UPLOAD_URL_RATE_LIMIT_PER_MIN=5000,GLOBAL_RATE_LIMIT_PER_MIN=5000
       - --quiet
 
 options:
