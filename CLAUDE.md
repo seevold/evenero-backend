@@ -65,6 +65,33 @@ For å sjekke drift før commit.
 - Staging: `zip-queue-v2-staging` (europe-west1)
 - Prod: `zip-queue-v2-prod` (europe-west1)
 
+## Miljø-spesifikke env-vars (fail-fast — ingen prod-fallbacks)
+
+Hver Cloud Run-service har env-vars som ER miljø-spesifikke. Disse skal IKKE
+ha hardkodede fallbacks i koden — tidligere defaultet flere til prod-verdier,
+som silent kunne mate staging til prod-bucket / prod-URL / live Stripe hvis
+env-var ble fjernet ved et uhell.
+
+**Mønster:** bruk `required('VAR_NAME')` eller `throw new Error(...)` hvis env
+ikke er satt. Bedre å feile høyt ved oppstart enn å silent kjøre mot feil miljø.
+
+| Env-var | Prod-verdi | Staging-verdi | Service |
+|---|---|---|---|
+| `GCS_BUCKET_NAME` | `evenero-cloud` | `evenero-staging-cloud` | main-api, image-processor-v2, video-processor-v2, zipper-service-v2 |
+| `CLOUD_SQL_INSTANCE` | `evenero:europe-north1:evenero-db-1` | `evenero:europe-north1:evenero-db-staging` | main-api, web-api |
+| `QUEUE_NAME` | `zip-queue-v2-prod` | `zip-queue-v2-staging` | zipper-service-v2 |
+| `SERVICE_URL` | `https://zipper-service-v2-467...run.app` | `https://zipper-service-v2-staging-467...run.app` | zipper-service-v2 |
+| `WEBHOOK_URL` | prod main-api `/api/zip-ready` | staging main-api `/api/zip-ready` | zipper-service-v2 |
+| `PUBLIC_APP_URL` | `https://event.evenero.com` | `https://staging-app.evenero.com` | main-api |
+| `CORS_ORIGINS` | `https://evenero.com,https://event.evenero.com,...` | `https://staging.evenero.com,https://staging-app.evenero.com,...` | main-api, web-api |
+| `STRIPE_PRODUCT_ID` | live product-ID | test product-ID | web-api |
+| `EMAIL_WHITELIST_TO` | tom (cutover-fase: send til kun whitelist) | testadresse (reruter ALL e-post) | main-api, web-api |
+| `DATABASE_URL` / `DB_*` | prod IAM-auth | staging password-auth | main-api, web-api |
+
+**Når du legger til en ny miljø-spesifikk env-var:** ALDRI bruk
+`process.env.X || 'fallback-prod-value'`. Bruk `required('X')` (mønstret i
+zipper-service-v2/src/config.ts) eller eksplisitt throw.
+
 ## Media path-konvensjoner (v1 vs v2 — KRITISK)
 
 `event_images.image_url` kan peke på to forskjellige strukturer. **Eventer
