@@ -73,9 +73,20 @@ app.post('/', async (req, res) => {
   const { eventId, mediaId, ext } = parsed;
 
   // Skip non-images. Eventarc filterer ideelt sett på contentType, men dobbeltsjekker.
-  if (event.contentType && !event.contentType.startsWith('image/')) {
-    console.log(`Skip: ${event.name} contentType=${event.contentType}`);
+  // Extension-fallback for filer hvor MIME mangler: Windows-HEIC kommer ofte
+  // som application/octet-stream eller tom MIME, men extension er .heic/.heif.
+  // Sharp/libvips håndterer HEIF fint så vi godtar dem via extension.
+  const imageExts = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'heic', 'heif', 'bmp', 'tiff'];
+  const extLower = (ext || '').toLowerCase();
+  const isImageByExt = imageExts.includes(extLower);
+  const isImageByMime = !event.contentType || event.contentType.startsWith('image/');
+
+  if (!isImageByMime && !isImageByExt) {
+    console.log(`Skip: ${event.name} contentType=${event.contentType} ext=${ext}`);
     return res.status(204).end();
+  }
+  if (!isImageByMime && isImageByExt) {
+    console.log(`[heic-fallback] ${event.name}: MIME=${event.contentType} men ext=${ext} — prosesserer som image`);
   }
 
   // Helper for best-effort skip-flag (sharp-feil, korrupt input, ukjent format).
