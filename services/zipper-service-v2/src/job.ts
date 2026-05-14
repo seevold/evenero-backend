@@ -18,6 +18,20 @@ import { sendWebhook } from './webhook.js';
 
 const storage = new Storage();
 
+// Cloud Run kan sende SIGTERM ved scale-down, deploy-replace, eller manual cancel.
+// Default Node-handler exit-er med kode 0, som Cloud Run tolker som "task succeeded"
+// — det maskerer ufullstendige ZIPs som "complete" i status-listing. Vi exit-er 1
+// så Cloud Run vet det feilet, retries kicker in (max-retries=3), og monitoring
+// kan rapportere det.
+function handleShutdown(signal: string): void {
+  console.error(JSON.stringify({ msg: 'job-interrupted', signal }));
+  // Best effort: la pågående I/O komme seg ut. Hvis det henger i 5s, exit-er vi
+  // tvunget med 1 (failed) så Cloud Run tilfsr retry.
+  setTimeout(() => process.exit(1), 5000).unref();
+}
+process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+process.on('SIGINT', () => handleShutdown('SIGINT'));
+
 type JobPayload = {
   jobId: string;
   mediaIds: string[];
