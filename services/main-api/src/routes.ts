@@ -1225,13 +1225,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   registerBothPaths("get", "/events/:event_id/images", async (req, res) => {
     const { event_id } = req.params;
+    const includeArchived = req.query.includeArchived === 'true';
 
     if (!event_id) {
       return res.status(400).json({ detail: "Event ID is required" });
     }
 
     try {
-      const images = await storage.getEventImages(event_id);
+      // ?includeArchived=true brukes på manage-event-siden for å vise total
+      // antall opplastet (inkl. soft-deleted). Default false så galleri-sider
+      // ikke får arkiverte i listevisning.
+      const images = await storage.getEventImages(event_id, includeArchived);
       res.json(images);
     } catch (error) {
       res.status(500).json({ detail: "Internal server error" });
