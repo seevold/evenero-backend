@@ -55,11 +55,11 @@
     "changeReminder": "Har du ombestemt deg? Bare se bort fra påminnelsen når den kommer."
   },
   "zipReady": {
-    "subject": "Bildenedlastingen din er klar",
+    "subject": "Nedlastingen din er klar",
     "preheader": "{{count}} filer ({{size}} MB) fra {{eventName}} klar for nedlasting.",
     "eyebrow": "Klar for nedlasting",
     "title": "Nedlastingen er klar",
-    "body": "Bildesamlingen din fra {{eventName}} er pakket og klar.",
+    "body": "Mediene dine fra {{eventName}} er pakket og klar.",
     "fileCountLabel": "bilder og videoer",
     "sizeLabel": "total størrelse",
     "downloadButton": "Last ned nå",

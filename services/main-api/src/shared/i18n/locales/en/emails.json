@@ -55,11 +55,11 @@
     "changeReminder": "Changed your mind? Just ignore the reminder when it arrives."
   },
   "zipReady": {
-    "subject": "Your photo download is ready",
+    "subject": "Your download is ready",
     "preheader": "{{count}} files ({{size}} MB) from {{eventName}} ready to download.",
     "eyebrow": "Download ready",
     "title": "Your download is ready",
-    "body": "Your photo collection from {{eventName}} has been packaged and is ready.",
+    "body": "Your media from {{eventName}} has been packaged and is ready.",
     "fileCountLabel": "photos & videos",
     "sizeLabel": "total size",
     "downloadButton": "Download now",

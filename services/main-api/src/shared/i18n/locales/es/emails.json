@@ -55,11 +55,11 @@
     "changeReminder": "¿Cambiaste de opinión? Solo ignora el recordatorio cuando llegue."
   },
   "zipReady": {
-    "subject": "Tu descarga de fotos está lista",
+    "subject": "Tu descarga está lista",
     "preheader": "{{count}} archivos ({{size}} MB) de {{eventName}} listos para descargar.",
     "eyebrow": "Listo para descargar",
     "title": "Tu descarga está lista",
-    "body": "Tu colección de fotos de {{eventName}} está empaquetada y lista.",
+    "body": "Tus archivos de {{eventName}} están empaquetados y listos.",
     "fileCountLabel": "fotos y videos",
     "sizeLabel": "tamaño total",
     "downloadButton": "Descargar ahora",

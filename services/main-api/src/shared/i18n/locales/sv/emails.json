@@ -55,11 +55,11 @@
     "changeReminder": "Har du ändrat dig? Ignorera bara påminnelsen när den kommer."
   },
   "zipReady": {
-    "subject": "Din bildnedladdning är klar",
+    "subject": "Din nedladdning är klar",
     "preheader": "{{count}} filer ({{size}} MB) från {{eventName}} redo att laddas ner.",
     "eyebrow": "Klar för nedladdning",
     "title": "Nedladdningen är klar",
-    "body": "Din bildsamling från {{eventName}} är paketerad och klar.",
+    "body": "Dina filer från {{eventName}} är paketerade och klara.",
     "fileCountLabel": "bilder & videor",
     "sizeLabel": "total storlek",
     "downloadButton": "Ladda ner nu",
