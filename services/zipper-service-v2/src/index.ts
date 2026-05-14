@@ -45,6 +45,12 @@ app.post('/zip', async (req, res) => {
     const [response] = await tasksClient.createTask({
       parent: queuePath,
       task: {
+        // Cloud Tasks default dispatchDeadline = 10 min. Store ZIPs (50+ filer
+        // / flere GB) overstiger lett dette og trigger retry-loop. Vi bruker
+        // 30 min som er max-grensen for Cloud Tasks. ZIPs som overstiger
+        // 30 min trenger en arkitektur-endring (Cloud Run Jobs eller chunked
+        // ZIP) — ikke løst her.
+        dispatchDeadline: { seconds: 1800 },
         httpRequest: {
           httpMethod: 'POST',
           url: `${config.serviceUrl}/process-zip`,
