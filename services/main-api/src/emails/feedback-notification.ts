@@ -7,8 +7,8 @@
 import { TOKENS } from './tokens.js';
 import { sendEmail } from './send.js';
 
-function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function esc(s: unknown): string {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 export async function sendFeedbackNotificationEmail(opts: {
