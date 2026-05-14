@@ -49,15 +49,6 @@ function esc(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-// Henter PUBLIC_APP_URL for å bygge stabile asset-URLer i emails (favicon).
-// Defaulter til prod-domenet etter cutover, eller .vercel.app før cutover.
-function getAssetBaseUrl(): string {
-  const env = process.env.PUBLIC_APP_URL;
-  if (env) return env.replace(/\/$/, '');
-  // Fallback (skal ikke ramme ved riktig deploy-config)
-  return 'https://evenero-app.vercel.app';
-}
-
 function renderBlockHtml(b: Block): string {
   switch (b.type) {
     case 'eyebrow':
@@ -182,13 +173,11 @@ export function renderEmail(opts: LayoutOptions): RenderedEmail {
   const year = new Date().getFullYear();
   const blocksHtml = opts.blocks.map(renderBlockHtml).join('');
   const blocksText = opts.blocks.map(renderBlockText).join('\n');
-  const assetBase = getAssetBaseUrl();
-  const faviconUrl = `${assetBase}/favicon.png`;
 
   // Outer table is the email-client way to constrain max-width and center.
   // Card div sits inside the table cell.
   //
-  // Header: favicon-ikon + wordmark + tynn gradient-strek.
+  // Header: wordmark + tynn gradient-strek.
   //
   // Gmail-clipping-fix: vi droppet tidligere Google Fonts <link>+<style>
   // blokker fordi Gmail stripper dem uansett — bare dødvekt mot 102KB-
@@ -219,10 +208,9 @@ ${'&zwnj;&nbsp;'.repeat(12)}
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
 <tr><td>
 
-<!-- Brand-header: favicon + wordmark + tynn gradient-strek -->
+<!-- Brand-header: wordmark + tynn gradient-strek -->
 <div style="text-align:center;padding:8px 0 32px 0;">
-  <img src="${esc(faviconUrl)}" width="44" height="44" alt="Evenero" style="display:inline-block;width:44px;height:44px;border:0;border-radius:10px;">
-  <div style="margin-top:10px;font-family:${TOKENS.sans};font-weight:700;font-size:22px;letter-spacing:-0.02em;color:${TOKENS.textPrimary};">evenero</div>
+  <div style="font-family:${TOKENS.sans};font-weight:700;font-size:22px;letter-spacing:-0.02em;color:${TOKENS.textPrimary};">evenero</div>
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:12px auto 0 auto;"><tr><td style="width:36px;height:2px;background:${TOKENS.accent};background:${TOKENS.accentGradient};font-size:0;line-height:0;border-radius:2px;">&nbsp;</td></tr></table>
 </div>
 
