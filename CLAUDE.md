@@ -1,5 +1,22 @@
 # Evenero — git+deploy regime
 
+> **STOPP — les dette først (gjelder enhver ny Claude-sesjon):**
+>
+> Før du gjør noen kode-endring i dette repoet, les
+> `~/.claude/projects/-Users-lasse-Projects-Evenero/memory/workflow.md`
+> og kjør sesjon-start-prosedyren som er beskrevet der. Det inneholder
+> beslutningstreet (bugfix vs feature vs hotfix vs sync), eksakte git-
+> kommandoer per scenario, og MÅ-reglene for branch-merging.
+>
+> Lasse er solo-dev og forventer at du styrer branch-strategien selv —
+> han skal ikke trenge å nevne `staging`, `main`, `feature/*` eller
+> `hotfix/*` for at riktig flyt skal skje. Workflow.md er kilden.
+>
+> Filen under er repo-spesifikk konfig (Cloud Run-services, SA-er, DB-er).
+> Workflow.md overstyrer alt om branch-flyt.
+
+---
+
 ## Branches → miljø
 
 | Branch | Cloud Run-services | Cloud Build-trigger |
