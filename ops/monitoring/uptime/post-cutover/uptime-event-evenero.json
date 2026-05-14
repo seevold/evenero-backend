@@ -1,0 +1,22 @@
+{
+  "_comment": "POST-CUTOVER. Erstatter uptime-evenero-app.json når DNS bytter fra Replit til Vercel. event.evenero.com peker da på evenero-app (Vite/React-frontend). Apply: se ops/monitoring/uptime/post-cutover/README.md",
+  "displayName": "evenero-app frontend (event.evenero.com)",
+  "monitoredResource": {
+    "type": "uptime_url",
+    "labels": {
+      "host": "event.evenero.com",
+      "project_id": "evenero"
+    }
+  },
+  "httpCheck": {
+    "path": "/",
+    "port": 443,
+    "useSsl": true,
+    "validateSsl": true,
+    "requestMethod": "GET",
+    "acceptedResponseStatusCodes": [{ "statusClass": "STATUS_CLASS_2XX" }]
+  },
+  "period": "300s",
+  "timeout": "10s",
+  "selectedRegions": ["EUROPE", "USA", "ASIA_PACIFIC"]
+}
