@@ -42,6 +42,10 @@ export interface IStorage {
   // Event image methods
   getEventImages(eventId: string, includeArchived?: boolean): Promise<EventImage[]>;
   addEventImages(images: InsertEventImage[]): Promise<EventImage[]>;
+  findExistingByTitleSize(
+    eventId: string,
+    files: Array<{ title: string; file_size: number; file_extension: string }>,
+  ): Promise<Array<{ title: string; file_size: number; file_extension: string }>>;
   updateShareConsent(imageIds: string[], consent: boolean): Promise<number>;
   getEventImageCount(eventId: string): Promise<number>;
   getEventContributorCount(eventId: string): Promise<number>;
@@ -373,6 +377,38 @@ export class PostgreSQLStorage implements IStorage {
 
   async addEventImages(images: InsertEventImage[]): Promise<EventImage[]> {
     return await db.insert(event_images).values(images).returning();
+  }
+
+  // Finn eksisterende ikke-arkiverte, ikke-purged bilder som matcher gitt
+  // (title, file_size, file_extension)-tripler. Brukt for å advare bruker om
+  // duplikater FØR opplasting starter. Filtrerer i to faser: SQL henter
+  // kandidater på title (indexable), JS gjør eksakt 3-felts-match.
+  async findExistingByTitleSize(
+    eventId: string,
+    files: Array<{ title: string; file_size: number; file_extension: string }>,
+  ): Promise<Array<{ title: string; file_size: number; file_extension: string }>> {
+    if (files.length === 0) return [];
+    const titles = Array.from(new Set(files.map(f => f.title)));
+    const candidates = await db
+      .select({
+        title: event_images.title,
+        file_size: event_images.file_size,
+        file_extension: event_images.file_extension,
+      })
+      .from(event_images)
+      .where(and(
+        eq(event_images.event_id, eventId),
+        eq(event_images.archived, false),
+        isNull(event_images.files_purged_at),
+        inArray(event_images.title, titles),
+      ));
+
+    const existingSet = new Set(
+      candidates.map(c => `${c.title}|${c.file_size}|${(c.file_extension || '').toLowerCase()}`),
+    );
+    return files.filter(f =>
+      existingSet.has(`${f.title}|${f.file_size}|${f.file_extension.toLowerCase()}`),
+    );
   }
 
   async updateShareConsent(imageIds: string[], consent: boolean): Promise<number> {

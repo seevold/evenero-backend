@@ -2246,6 +2246,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Sjekker hvilke av de oppgitte filene allerede finnes i event (samme
+  // title + file_size + file_extension). Brukes pre-upload for å advare
+  // bruker om duplikater. Filtrerer arkiverte og purged bort fra match.
+  registerBothPaths("post", "/events/:event_id/check-duplicates", async (req, res) => {
+    const { event_id } = req.params;
+    const { files } = req.body ?? {};
+
+    if (!event_id) {
+      return res.status(400).json({ detail: "Missing event_id" });
+    }
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ detail: "files must be a non-empty array" });
+    }
+    if (files.length > 500) {
+      return res.status(400).json({ detail: "Maximum 500 files per request" });
+    }
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      if (!f || typeof f.title !== 'string' || typeof f.file_size !== 'number' || typeof f.file_extension !== 'string') {
+        return res.status(400).json({ detail: `Invalid file at index ${i}: requires {title, file_size, file_extension}` });
+      }
+    }
+
+    try {
+      const duplicates = await storage.findExistingByTitleSize(event_id, files);
+      res.json({ duplicates });
+    } catch (error) {
+      console.error('Error checking duplicates:', error);
+      res.status(500).json({ detail: "Internal server error" });
+    }
+  });
+
   registerBothPaths("post", "/archive-images", async (req, res) => {
     const { event_id, image_ids } = req.body;
 
