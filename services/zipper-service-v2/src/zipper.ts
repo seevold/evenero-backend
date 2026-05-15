@@ -90,20 +90,53 @@ export async function buildZip(
       continue;
     }
 
+    let readStream: ReturnType<typeof fileHandle.createReadStream> | null = null;
     try {
       const displayName = fileHandle.name.split('/').pop()!;
-      // Default highWaterMark (16 KB) er greit her — sekvensiell streaming inn i
-      // archiver, ikke et hoten-loop. v1 satte 256 KB men det er ikke synlig i typed API.
-      const readStream = fileHandle.createReadStream();
+
+      // Hent fil-størrelse FØR streaming. Trengs for to grunner:
+      //   1. Per-fil timeout må være proporsjonal med filstørrelse — 60s er
+      //      for kort for 21 GB-filer (16 min ved 22 MB/s).
+      //   2. archiver med kjent størrelse kan optimalisere ZIP central-directory.
+      let fileSizeBytes = 0;
+      try {
+        const [meta] = await fileHandle.getMetadata();
+        fileSizeBytes = parseInt(String(meta.size ?? '0'), 10);
+      } catch { /* fortsett uten kjent størrelse */ }
+
+      // Dynamisk timeout: minimum 5 min, plus 1 sek per MB. For 21 GB-fil:
+      // 300s + 21*1024s = 21800s = ~6 timer maks. Beskytter mot uendelig hang
+      // mens den lar real-world streaming gjennomføres uavhengig av størrelse.
+      const fileSizeMb = Math.ceil(fileSizeBytes / 1024 / 1024);
+      const timeoutMs = Math.max(
+        config.filePerStreamTimeoutMs,
+        300_000 + fileSizeMb * 1000,
+      );
+
+      console.log(JSON.stringify({
+        msg: 'file-start',
+        idx: i + 1,
+        total: mediaIds.length,
+        name: displayName,
+        sizeMB: Math.round(fileSizeBytes / 1024 / 1024 * 10) / 10,
+        timeoutSec: Math.round(timeoutMs / 1000),
+      }));
+
+      readStream = fileHandle.createReadStream();
+      const localReadStream = readStream;
 
       await new Promise<void>((resolve, reject) => {
         let ended = false;
         let errored = false;
         const timeout = setTimeout(() => {
-          if (!ended && !errored) reject(new Error(`Timeout streaming ${displayName}`));
-        }, config.filePerStreamTimeoutMs);
+          if (!ended && !errored) {
+            // Destroy stream så GCS-connection lukkes og vi ikke leakker.
+            try { localReadStream.destroy(new Error('timeout')); } catch { /* ignore */ }
+            reject(new Error(`Timeout streaming ${displayName} (${timeoutMs}ms)`));
+          }
+        }, timeoutMs);
 
-        readStream.on('end', () => {
+        localReadStream.on('end', () => {
           ended = true;
           clearTimeout(timeout);
           // Liten mikrotick så archiver får fordøye chunks.
@@ -111,24 +144,42 @@ export async function buildZip(
             if (!errored) resolve();
           });
         });
-        readStream.on('error', (err) => {
+        localReadStream.on('error', (err) => {
           errored = true;
           clearTimeout(timeout);
           reject(err);
         });
 
-        archive.append(readStream, { name: displayName });
+        archive.append(localReadStream, { name: displayName });
       });
 
       processed++;
+      console.log(JSON.stringify({
+        msg: 'file-done',
+        idx: i + 1,
+        total: mediaIds.length,
+        name: displayName,
+        processedSoFar: processed,
+      }));
+
       // Slipp event loop hver 100. fil for GC.
       if (processed % 100 === 0) {
         await new Promise((r) => setImmediate(r));
       }
     } catch (err) {
+      // Defensiv cleanup — hvis vi havnet her med en åpen stream, destroy den.
+      if (readStream && !readStream.destroyed) {
+        try { readStream.destroy(); } catch { /* ignore */ }
+      }
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`Error ${rawId}: ${msg}`);
       skipped++;
+      console.warn(JSON.stringify({
+        msg: 'file-error',
+        idx: i + 1,
+        rawId,
+        error: msg,
+      }));
     }
   }
 

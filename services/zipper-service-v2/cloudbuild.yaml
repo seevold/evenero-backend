@@ -70,7 +70,7 @@ steps:
       - --service-account=staging-runner@${PROJECT_ID}.iam.gserviceaccount.com
       - --set-env-vars=^|^GCS_BUCKET_NAME=evenero-staging-cloud|GCP_PROJECT_ID=${PROJECT_ID}|WEBHOOK_URL=https://main-api-staging-v7cr3xx5ca-lz.a.run.app/api/zip-ready|JOB_MODE=true|QUEUE_NAME=unused-in-job-mode|SERVICE_URL=unused-in-job-mode|WORKER_SERVICE_ACCOUNT=unused-in-job-mode|ZIP_OUTPUT=gcs|R2_ACCOUNT_ID=7a2a8934c6fbf8b8840aaa2bd8a0c46b|R2_BUCKET=evenero-zip-staging|R2_JURISDICTION=eu
       - --set-secrets=WEBHOOK_API_KEY=staging-webhook-api-key:latest,R2_ACCESS_KEY_ID=staging-r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=staging-r2-secret-access-key:latest
-      - --memory=2Gi
+      - --memory=4Gi
       - --cpu=2
       - --max-retries=3
       - --task-timeout=43200s
