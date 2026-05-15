@@ -92,7 +92,15 @@ app.use((req, res, next) => {
   await runMigrations();
 
   // Rate-limiters MÅ registreres før routes (de er middleware som matcher etter path).
-  app.use(["/generate-signed-url", "/api/generate-signed-url"], uploadUrlLimiter);
+  app.use(
+    [
+      "/generate-signed-url",
+      "/api/generate-signed-url",
+      "/generate-signed-urls",
+      "/api/generate-signed-urls",
+    ],
+    uploadUrlLimiter,
+  );
   app.use("/api", globalLimiter);
 
   const server = await registerRoutes(app);

@@ -2177,6 +2177,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Batch-versjon: ett kall gir signed URLs for inntil 500 filer.
+  // Reduserer round-trips drastisk ved store batcher (1200 filer: 5 kall i stedet for 150).
+  // Per-fil feil isoleres — klient ser hvilke som lyktes/feilet.
+  // Eksisterende single-endpoints (GET/POST /generate-signed-url) er uendret —
+  // klienten faller tilbake til dem hvis denne svarer 404 (deploy-rekkefølge).
+  registerBothPaths("post", "/generate-signed-urls", async (req, res) => {
+    const { event_id, files } = req.body ?? {};
+
+    if (!event_id || typeof event_id !== 'string') {
+      return res.status(400).json({ detail: "Missing or invalid event_id" });
+    }
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ detail: "files must be a non-empty array" });
+    }
+    if (files.length > 500) {
+      return res.status(400).json({ detail: "Maximum 500 files per batch" });
+    }
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      if (!f || typeof f.filename !== 'string' || typeof f.content_type !== 'string' || typeof f.sequence !== 'number') {
+        return res.status(400).json({ detail: `Invalid file at index ${i}: requires {filename, content_type, sequence}` });
+      }
+    }
+
+    try {
+      const event = await storage.getEvent(event_id);
+      if (event) {
+        const uploadStatus = getUploadStatus(event.created_at, event.uploads_disabled ?? false);
+        if (!uploadStatus.canUpload) {
+          return res.status(403).json({
+            detail: "Uploads are closed for this event",
+            reason: uploadStatus.isExpired ? 'expired' : 'disabled',
+            message: uploadStatus.statusText,
+          });
+        }
+      }
+
+      const { generateUploadUrlsBatch } = await import('./gcs');
+      const batchInput = files.map((f: { filename: string; content_type: string; sequence: number }) => ({
+        filename: f.filename,
+        contentType: f.content_type,
+        sequence: f.sequence,
+      }));
+      const results = await generateUploadUrlsBatch(event_id, batchInput);
+
+      const urls = results.map(r => {
+        if (r.ok) {
+          return {
+            sequence: r.sequence,
+            filename: r.filename,
+            upload_url: r.url,
+            public_url: r.publicUrl,
+            media_id: r.mediaId,
+          };
+        }
+        return {
+          sequence: r.sequence,
+          filename: r.filename,
+          error: r.error,
+        };
+      });
+
+      res.json({ urls });
+    } catch (error) {
+      console.error('Error generating batch signed URLs:', error);
+      res.status(500).json({ detail: "Internal server error" });
+    }
+  });
+
   registerBothPaths("post", "/archive-images", async (req, res) => {
     const { event_id, image_ids } = req.body;
 

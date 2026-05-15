@@ -98,6 +98,54 @@ export async function generateUploadUrl(
   }
 }
 
+// Batch-versjon av generateUploadUrl: signerer mange URL-er parallelt i ett
+// kall. Gevinst: én HTTP round-trip fra klient i stedet for én per fil.
+// Path-konvensjon, mediaId-format, expiry og contentType-håndtering er
+// 1:1 lik enkelt-versjonen — klienten får eksakt samme felt-shape per fil.
+//
+// Per-fil-feil isoleres (Promise.allSettled) så én korrupt fil ikke dreper
+// hele batchen. Resultater returneres i samme rekkefølge som input.
+export type BatchUploadUrlResult =
+  | { ok: true; sequence: number; filename: string; url: string; publicUrl: string; mediaId: string }
+  | { ok: false; sequence: number; filename: string; error: string };
+
+export async function generateUploadUrlsBatch(
+  eventId: string,
+  files: Array<{ filename: string; contentType: string; sequence: number }>,
+): Promise<BatchUploadUrlResult[]> {
+  if (!storage) {
+    console.error('Google Cloud Storage not initialized');
+    return files.map(f => ({
+      ok: false,
+      sequence: f.sequence,
+      filename: f.filename,
+      error: 'Storage not initialized',
+    }));
+  }
+
+  const results = await Promise.allSettled(
+    files.map(f => generateUploadUrl(eventId, 'batch', f.sequence, f.filename, f.contentType)),
+  );
+
+  return results.map((r, i): BatchUploadUrlResult => {
+    const input = files[i];
+    if (r.status === 'rejected') {
+      return { ok: false, sequence: input.sequence, filename: input.filename, error: String(r.reason) };
+    }
+    if (!r.value) {
+      return { ok: false, sequence: input.sequence, filename: input.filename, error: 'Failed to generate URL' };
+    }
+    return {
+      ok: true,
+      sequence: input.sequence,
+      filename: input.filename,
+      url: r.value.url,
+      publicUrl: r.value.publicUrl,
+      mediaId: r.value.mediaId,
+    };
+  });
+}
+
 // Upload file directly to Google Cloud Storage (for server-side uploads like QR codes)
 export async function uploadToGoogleCloudStorage(
   localFilePath: string,
