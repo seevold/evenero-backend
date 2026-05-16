@@ -552,6 +552,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const currency = getCurrencyForCountry(country, stripeData.currencyOptions);
       const unitAmount = stripeData.currencyOptions[currency] ?? stripeData.defaultAmount;
 
+      // Validér customer_email før vi sender til Stripe — ugyldig format
+      // gjør at hele session-creation feiler. Skip pre-fill hvis ugyldig.
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const prefilledEmail = (typeof customerEmail === 'string' && emailRegex.test(customerEmail.trim()))
+        ? customerEmail.trim()
+        : null;
+
       const sessionData: any = {
         line_items: [
           {
@@ -579,7 +586,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         invoice_creation: {
           enabled: true,
         },
-        billing_address_collection: 'auto'
+        billing_address_collection: 'auto',
+        // Pre-fyll e-post i checkout. Stripe gjør feltet read-only i embedded
+        // mode når customer_email er satt — forhindrer at innlogget bruker
+        // ved et uhell betaler med en annen e-post enn appen kjenner til,
+        // som ville sende credits til feil bruker.
+        ...(prefilledEmail && { customer_email: prefilledEmail }),
       };
 
       // If coupon code provided via URL parameter, automatically apply it
