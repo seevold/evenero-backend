@@ -36,7 +36,7 @@ export async function findArchivedToPurge(graceDays: number): Promise<PurgeCandi
     event_id: row.event_id,
     image_url: row.image_url,
     file_extension: row.file_extension,
-    file_size: row.file_size,
+    file_size: row.file_size == null ? null : Number(row.file_size),
     category: "archived" as const,
     trigger_at: new Date(row.trigger_at),
   }));
@@ -59,7 +59,7 @@ export async function findRejectedToPurge(graceDays: number): Promise<PurgeCandi
     event_id: row.event_id,
     image_url: row.image_url,
     file_extension: row.file_extension,
-    file_size: row.file_size,
+    file_size: row.file_size == null ? null : Number(row.file_size),
     category: "rejected" as const,
     trigger_at: new Date(row.trigger_at),
   }));
@@ -86,7 +86,7 @@ export async function findFromDeletedEventsToPurge(graceDays: number): Promise<P
     event_id: row.event_id,
     image_url: row.image_url,
     file_extension: row.file_extension,
-    file_size: row.file_size,
+    file_size: row.file_size == null ? null : Number(row.file_size),
     category: "event_deleted" as const,
     trigger_at: new Date(row.trigger_at),
   }));

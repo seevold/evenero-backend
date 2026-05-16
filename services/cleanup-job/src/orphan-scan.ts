@@ -1,18 +1,20 @@
 // Orphan bucket-scan — kategori 4 i cleanup-planen.
 //
-// Lister filer under kjente prefixes (originals/, derived/, images/) og krysser
-// mot DB-referanser. Filer som IKKE er referert AND eldre enn orphanGraceDays
-// klassifiseres som orphan.
+// Lister filer under kjente prefixes (originals/, derived/, images/, covers/) og
+// krysser mot DB-referanser. Filer som IKKE er referert AND eldre enn
+// orphanGraceDays klassifiseres som orphan.
 //
 // Konservativ tilnærming:
 //  - Kun kjente prefixes scannes. Ukjente paths ignoreres helt.
 //  - Alder-filter (orphanGraceDays) beskytter mot race med pågående uploads.
 //  - Cover-paths sjekkes mot events.event_photo (alle aktive eventer + grace-perioden).
 //
-// Returnerer kandidater for sletting — selve sletting + caps håndteres av main loop.
+// MEMORY: bruker streaming-iter via forEachFile slik at vi ikke holder hele
+// fil-lista i RAM. Prod-bucket har ~50k filer → uten streaming OOM-er en
+// 512MiB-container.
 
 import type { File as GCSFile } from "@google-cloud/storage";
-import { listFilesWithMetadata } from "./gcs.js";
+import { forEachFile } from "./gcs.js";
 import type { DbReferences } from "./queries.js";
 
 export interface OrphanCandidate {
@@ -45,26 +47,27 @@ export async function scanOrphans(
   // ---- Scan originals/ ----
   // v2-format: originals/{eventId}/{mediaId}.{ext}
   // Orphan hvis: path ikke i imagePaths (= ingen event_images-rad med denne URL)
-  const originals = await listFilesWithMetadata("originals/");
-  console.log(`[ORPHAN-SCAN] Found ${originals.length} files in originals/`);
-  for (const f of originals) {
-    if (ageDays(f) < orphanGraceDays) continue;
-    if (refs.imagePaths.has(f.name)) continue;
+  let originalsCount = 0;
+  await forEachFile("originals/", (f) => {
+    originalsCount++;
+    if (ageDays(f) < orphanGraceDays) return;
+    if (refs.imagePaths.has(f.name)) return;
     candidates.push({
       path: f.name,
       size: sizeOf(f),
       ageInDays: ageDays(f),
       reason: "v2_original_no_db_row",
     });
-  }
+  });
+  console.log(`[ORPHAN-SCAN] Scanned ${originalsCount} files in originals/`);
 
   // ---- Scan derived/ ----
   // Format: derived/{eventId}/{mediaId}/{thumb,medium,poster,preview}.{ext}
   // Orphan hvis: (eventId, mediaId)-paret ikke finnes i v2EventMediaPairs.
-  const derived = await listFilesWithMetadata("derived/");
-  console.log(`[ORPHAN-SCAN] Found ${derived.length} files in derived/`);
-  for (const f of derived) {
-    if (ageDays(f) < orphanGraceDays) continue;
+  let derivedCount = 0;
+  await forEachFile("derived/", (f) => {
+    derivedCount++;
+    if (ageDays(f) < orphanGraceDays) return;
 
     // Spesialcase: derived/zip/{jobId}.zip har lifecycle-rule på 7 dager.
     // Vi tar dem med her hvis lifecycle ikke har gjort jobben.
@@ -77,20 +80,21 @@ export async function scanOrphans(
           reason: "old_zip",
         });
       }
-      continue;
+      return;
     }
 
     const m = f.name.match(/^derived\/([^/]+)\/([^/]+)\//);
-    if (!m) continue; // ukjent format under derived/ — skip
+    if (!m) return; // ukjent format under derived/ — skip
     const pair = `${m[1]}/${m[2]}`;
-    if (refs.v2EventMediaPairs.has(pair)) continue;
+    if (refs.v2EventMediaPairs.has(pair)) return;
     candidates.push({
       path: f.name,
       size: sizeOf(f),
       ageInDays: ageDays(f),
       reason: "v2_derived_no_source",
     });
-  }
+  });
+  console.log(`[ORPHAN-SCAN] Scanned ${derivedCount} files in derived/`);
 
   // ---- Scan images/ (v1 legacy) ----
   // Format: images/{filename}.{ext} (flat). Også derivat (_small/_compressed).
@@ -98,19 +102,19 @@ export async function scanOrphans(
   //
   // VIKTIG: vi sjekker både original og derivat. Hvis original = images/foo.jpg
   // er referert, så er images/foo_small.jpg automatisk OK (samme bilde).
-  const images = await listFilesWithMetadata("images/");
-  console.log(`[ORPHAN-SCAN] Found ${images.length} files in images/`);
-  for (const f of images) {
-    if (ageDays(f) < orphanGraceDays) continue;
+  let imagesCount = 0;
+  await forEachFile("images/", (f) => {
+    imagesCount++;
+    if (ageDays(f) < orphanGraceDays) return;
 
     // Avled "original-pathen" fra evt derivat-navn:
     // foo_small.jpg → foo.jpg, foo_compressed.mp4 → foo.mp4
     const stripped = stripDerivativeSuffix(f.name);
 
-    if (refs.imagePaths.has(f.name)) continue;
-    if (refs.imagePaths.has(stripped)) continue;
-    if (refs.coverPaths.has(f.name)) continue;
-    if (refs.coverPaths.has(stripped)) continue;
+    if (refs.imagePaths.has(f.name)) return;
+    if (refs.imagePaths.has(stripped)) return;
+    if (refs.coverPaths.has(f.name)) return;
+    if (refs.coverPaths.has(stripped)) return;
 
     candidates.push({
       path: f.name,
@@ -118,23 +122,25 @@ export async function scanOrphans(
       ageInDays: ageDays(f),
       reason: "v1_image_no_db_row",
     });
-  }
+  });
+  console.log(`[ORPHAN-SCAN] Scanned ${imagesCount} files in images/`);
 
   // ---- Scan covers/ ----
   // Cover-uploads bruker covers/{name} (eller legacy cover-prefiks i filnavn).
   // Orphan hvis: path ikke i coverPaths.
-  const covers = await listFilesWithMetadata("covers/");
-  console.log(`[ORPHAN-SCAN] Found ${covers.length} files in covers/`);
-  for (const f of covers) {
-    if (ageDays(f) < orphanGraceDays) continue;
-    if (refs.coverPaths.has(f.name)) continue;
+  let coversCount = 0;
+  await forEachFile("covers/", (f) => {
+    coversCount++;
+    if (ageDays(f) < orphanGraceDays) return;
+    if (refs.coverPaths.has(f.name)) return;
     candidates.push({
       path: f.name,
       size: sizeOf(f),
       ageInDays: ageDays(f),
       reason: "cover_orphan",
     });
-  }
+  });
+  console.log(`[ORPHAN-SCAN] Scanned ${coversCount} files in covers/`);
 
   return candidates;
 }

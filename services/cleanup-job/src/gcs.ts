@@ -37,17 +37,35 @@ export async function deletePrefix(prefix: string): Promise<number> {
   }
 }
 
-// List files under prefix — returnerer full File-objekter med metadata
-// (size, last_modified). Brukt av orphan-scanner som trenger å filtrere på alder.
-export async function listFilesWithMetadata(prefix: string): Promise<GCSFile[]> {
-  try {
+// Stream-iterate filer under prefix. Brukt av orphan-scanner — prod-bucket har
+// 50k+ filer, så å laste hele lista i minnet OOM-er en 512MiB-container.
+// Streaming holder konstant ~lite minne uavhengig av størrelse.
+export async function forEachFile(
+  prefix: string,
+  handler: (file: GCSFile) => void | Promise<void>,
+): Promise<number> {
+  let count = 0;
+  return new Promise((resolve, reject) => {
     const bucket = storage.bucket(config.gcsBucket);
-    const [files] = await bucket.getFiles({ prefix });
-    return files;
-  } catch (error: any) {
-    console.error(`[GCS] Failed to list ${prefix}:`, error?.message || error);
-    return [];
-  }
+    const stream = bucket.getFilesStream({ prefix });
+    stream.on("data", (file: GCSFile) => {
+      try {
+        const r = handler(file);
+        if (r instanceof Promise) {
+          stream.pause();
+          r.then(() => stream.resume()).catch((e) => stream.destroy(e));
+        }
+        count++;
+      } catch (e: any) {
+        stream.destroy(e);
+      }
+    });
+    stream.on("end", () => resolve(count));
+    stream.on("error", (err) => {
+      console.error(`[GCS] Stream failed for ${prefix}:`, err?.message || err);
+      reject(err);
+    });
+  });
 }
 
 // Extract GCS-path fra full URL eller gs://-URI. Returnerer null hvis URL
