@@ -1,0 +1,44 @@
+# Cloud Build pipeline for cleanup-job — Cloud Run JOB (ikke service).
+# Job kjører på Cloud Scheduler-trigger (daglig 03:00), ikke kontinuerlig.
+# Build context er repo-rot.
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    dir: services/cleanup-job
+    args:
+      - build
+      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/cleanup-job-staging:${SHORT_SHA}
+      - --tag=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/cleanup-job-staging:latest
+      - .
+
+  - id: push-sha
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/cleanup-job-staging:${SHORT_SHA}
+
+  - id: push-latest
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/cleanup-job-staging:latest
+
+  # Deploy som Cloud Run JOB (ikke service). `jobs deploy` opprettes første
+  # gang manuelt — denne `jobs update`-en bruker eksisterende job-definisjon
+  # og oppdaterer kun image + envs som kan endres uten å re-opprette.
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - update
+      - cleanup-job-staging
+      - --image=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/cleanup-job-staging:${SHORT_SHA}
+      - --region=europe-north1
+      - --project=${PROJECT_ID}
+      - --quiet
+
+options:
+  logging: CLOUD_LOGGING_ONLY
