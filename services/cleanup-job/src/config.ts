@@ -67,6 +67,11 @@ export const config = {
   // men ikke rakket å skrive event_images-raden ennå.
   orphanGraceDays: optionalNum("CLEANUP_ORPHAN_GRACE_DAYS", 7),
 
+  // Verifikasjons-modus: etter orphan-scan, kryss-sjekk parsed event_ids mot
+  // events-tabellen og spot-check filnavn mot event_images. Brukes FØR live-deletion
+  // for å bekrefte at klassifisering ikke produserer falske positiver.
+  verifyOrphans: optionalBool("CLEANUP_VERIFY_ORPHANS", false),
+
   // ==== ALERTING (via Mailgun, samme som main-api) ====
   alertEmail: process.env.ALERT_EMAIL, // ingen alert hvis ikke satt
   mailgunApiKey: process.env.MAILGUN_API_KEY || "",

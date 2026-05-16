@@ -33,6 +33,7 @@ import {
   type PurgeCandidate,
 } from "./queries.js";
 import { scanOrphans, type OrphanCandidate } from "./orphan-scan.js";
+import { verifyOrphans, printVerifyReport, debugImageUrlFormatsForEvents } from "./verify.js";
 import { sendAlert } from "./alert.js";
 
 interface RunSummary {
@@ -130,6 +131,19 @@ async function main() {
     console.log(`[PHASE-2] Orphan candidates: ${orphans.length}`);
     for (const [reason, count] of Object.entries(summary.orphans.byReason)) {
       console.log(`           ${reason}: ${count}`);
+    }
+
+    if (config.verifyOrphans) {
+      const verifyReport = await verifyOrphans(orphans);
+      printVerifyReport(verifyReport);
+      // Hvis vi fant orphans som tilhører aktive events: dump image_url-format-samples
+      // så vi kan se HVORFOR klassifisereren bommet.
+      if (verifyReport.eventCategories.active_event > 0) {
+        const riskyEventIds = verifyReport.riskySamples
+          .filter((s) => s.eventStatus && !s.eventStatus.deleted_at && s.eventStatus.active !== false)
+          .map((s) => s.eventStatus!.event_id);
+        await debugImageUrlFormatsForEvents(riskyEventIds.slice(0, 3));
+      }
     }
   } else {
     console.log(`[PHASE-2] Orphan scan disabled (CLEANUP_SCAN_ORPHANS=false)`);
