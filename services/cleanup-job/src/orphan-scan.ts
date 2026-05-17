@@ -47,11 +47,14 @@ export async function scanOrphans(
   // ---- Scan originals/ ----
   // v2-format: originals/{eventId}/{mediaId}.{ext}
   // Orphan hvis: path ikke i imagePaths (= ingen event_images-rad med denne URL)
+  // OG eventId ikke er i inactiveEventIds (skip ikke-aktive events).
   let originalsCount = 0;
   await forEachFile("originals/", (f) => {
     originalsCount++;
     if (ageDays(f) < orphanGraceDays) return;
     if (refs.imagePaths.has(f.name)) return;
+    const m = f.name.match(/^originals\/([^/]+)\//);
+    if (m && refs.inactiveEventIds.has(m[1])) return; // skip inactive event
     candidates.push({
       path: f.name,
       size: sizeOf(f),
@@ -87,6 +90,7 @@ export async function scanOrphans(
     if (!m) return; // ukjent format under derived/ — skip
     const pair = `${m[1]}/${m[2]}`;
     if (refs.v2EventMediaPairs.has(pair)) return;
+    if (refs.inactiveEventIds.has(m[1])) return; // skip inactive event
     candidates.push({
       path: f.name,
       size: sizeOf(f),
@@ -97,11 +101,13 @@ export async function scanOrphans(
   console.log(`[ORPHAN-SCAN] Scanned ${derivedCount} files in derived/`);
 
   // ---- Scan images/ (v1 legacy) ----
-  // Format: images/{filename}.{ext} (flat). Også derivat (_small/_compressed).
+  // Format: images/{eventId}__{batchId}__{seq}__{filename}.{ext} (flat).
+  // Også derivat (_small/_compressed).
   // Orphan hvis: path ikke i imagePaths AND ikke i coverPaths.
   //
   // VIKTIG: vi sjekker både original og derivat. Hvis original = images/foo.jpg
   // er referert, så er images/foo_small.jpg automatisk OK (samme bilde).
+  // Også: hvis parsed eventId er i inactiveEventIds, skip (ikke-aktiverte events).
   let imagesCount = 0;
   await forEachFile("images/", (f) => {
     imagesCount++;
@@ -115,6 +121,10 @@ export async function scanOrphans(
     if (refs.imagePaths.has(stripped)) return;
     if (refs.coverPaths.has(f.name)) return;
     if (refs.coverPaths.has(stripped)) return;
+
+    // v1-path format: images/{eventId}__... → parser eventId fra navnet før __
+    const v1Match = f.name.match(/^images\/([^_]+(?:_[^_]+)*?)__/);
+    if (v1Match && refs.inactiveEventIds.has(v1Match[1])) return; // skip inactive event
 
     candidates.push({
       path: f.name,

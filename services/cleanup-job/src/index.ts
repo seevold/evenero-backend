@@ -33,7 +33,12 @@ import {
   type PurgeCandidate,
 } from "./queries.js";
 import { scanOrphans, type OrphanCandidate } from "./orphan-scan.js";
-import { verifyOrphans, printVerifyReport, debugImageUrlFormatsForEvents } from "./verify.js";
+import {
+  verifyOrphans,
+  printVerifyReport,
+  debugImageUrlFormatsForEvents,
+  exhaustiveExactMatchCheck,
+} from "./verify.js";
 import { sendAlert } from "./alert.js";
 
 interface RunSummary {
@@ -144,6 +149,32 @@ async function main() {
           .map((s) => s.eventStatus!.event_id);
         await debugImageUrlFormatsForEvents(riskyEventIds.slice(0, 3));
       }
+
+      // ---- Definitiv sjekk: NULL exact-path-matches betyr at INGEN orphan
+      // er referert i et aktivt galleri eller som cover. Dette er det sterkeste
+      // beviset for at sletting er trygt. ----
+      console.log(`[EXACT-MATCH] Running exhaustive exact-path check for all ${orphans.length} orphans...`);
+      const exactCheck = await exhaustiveExactMatchCheck(orphans);
+      console.log("==========================================================");
+      console.log("[EXACT-MATCH] Definitive check result:");
+      console.log(`  Total orphans checked:                ${exactCheck.totalChecked}`);
+      console.log(`  Matched in event_images.image_url:    ${exactCheck.matchedInEventImages.length}  ${exactCheck.matchedInEventImages.length === 0 ? "✅ none — confirmed not in any gallery" : "🚨 FOUND — investigate"}`);
+      console.log(`  Matched in events.event_photo:        ${exactCheck.matchedInCoverPhoto.length}  ${exactCheck.matchedInCoverPhoto.length === 0 ? "✅ none — confirmed not used as cover" : "🚨 FOUND — investigate"}`);
+      if (exactCheck.matchedInEventImages.length > 0) {
+        console.log("Event_images matches (first 20):");
+        for (const m of exactCheck.matchedInEventImages.slice(0, 20)) {
+          console.log(`  path=${m.path} event=${m.event_id} archived=${m.archived} purged=${!!m.files_purged_at}`);
+          console.log(`    matched_image_url=${m.image_url.substring(0, 140)}`);
+        }
+      }
+      if (exactCheck.matchedInCoverPhoto.length > 0) {
+        console.log("Cover_photo matches (first 20):");
+        for (const m of exactCheck.matchedInCoverPhoto.slice(0, 20)) {
+          console.log(`  path=${m.path} event=${m.event_id} deleted_at=${m.deleted_at}`);
+          console.log(`    matched_event_photo=${m.event_photo.substring(0, 140)}`);
+        }
+      }
+      console.log("==========================================================");
     }
   } else {
     console.log(`[PHASE-2] Orphan scan disabled (CLEANUP_SCAN_ORPHANS=false)`);

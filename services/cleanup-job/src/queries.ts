@@ -20,15 +20,20 @@ export interface PurgeCandidate {
 }
 
 // Kategori 1: Arkivert >graceDays dager
+// LEFT JOIN events → skip bilder for inactive events (active=false).
+// Hvis event er hard-slettet fra events-tabellen (e.event_id IS NULL),
+// tillates sletting siden eventen ikke finnes lengre.
 export async function findArchivedToPurge(graceDays: number): Promise<PurgeCandidate[]> {
   const sql = `
-    SELECT id, event_id, image_url, file_extension, file_size, archived_at AS trigger_at
-    FROM event_images
-    WHERE archived = true
-      AND archived_at IS NOT NULL
-      AND archived_at < NOW() - ($1::int || ' days')::interval
-      AND files_purged_at IS NULL
-    ORDER BY archived_at ASC
+    SELECT ei.id, ei.event_id, ei.image_url, ei.file_extension, ei.file_size, ei.archived_at AS trigger_at
+    FROM event_images ei
+    LEFT JOIN events e ON e.event_id = ei.event_id
+    WHERE ei.archived = true
+      AND ei.archived_at IS NOT NULL
+      AND ei.archived_at < NOW() - ($1::int || ' days')::interval
+      AND ei.files_purged_at IS NULL
+      AND (e.event_id IS NULL OR e.active IS DISTINCT FROM false)
+    ORDER BY ei.archived_at ASC
   `;
   const r = await pool.query(sql, [graceDays]);
   return r.rows.map((row) => ({
@@ -43,15 +48,19 @@ export async function findArchivedToPurge(graceDays: number): Promise<PurgeCandi
 }
 
 // Kategori 2: Moderering-avvist (rejected) >graceDays dager
+// LEFT JOIN events → skip bilder for inactive events. Hard-deleted events (NULL JOIN)
+// tillates siden eventen ikke finnes lenger.
 export async function findRejectedToPurge(graceDays: number): Promise<PurgeCandidate[]> {
   const sql = `
-    SELECT id, event_id, image_url, file_extension, file_size, moderated_at AS trigger_at
-    FROM event_images
-    WHERE moderation_status = 'rejected'
-      AND moderated_at IS NOT NULL
-      AND moderated_at < NOW() - ($1::int || ' days')::interval
-      AND files_purged_at IS NULL
-    ORDER BY moderated_at ASC
+    SELECT ei.id, ei.event_id, ei.image_url, ei.file_extension, ei.file_size, ei.moderated_at AS trigger_at
+    FROM event_images ei
+    LEFT JOIN events e ON e.event_id = ei.event_id
+    WHERE ei.moderation_status = 'rejected'
+      AND ei.moderated_at IS NOT NULL
+      AND ei.moderated_at < NOW() - ($1::int || ' days')::interval
+      AND ei.files_purged_at IS NULL
+      AND (e.event_id IS NULL OR e.active IS DISTINCT FROM false)
+    ORDER BY ei.moderated_at ASC
   `;
   const r = await pool.query(sql, [graceDays]);
   return r.rows.map((row) => ({
@@ -118,6 +127,10 @@ export interface DbReferences {
   // mediaId-er (event_images.id) for v2-rader — brukt for derived/{ev}/{med}/-orphan-deteksjon.
   // Format: "eventId/mediaId"
   v2EventMediaPairs: Set<string>;
+  // Event-IDs som er active=false. Orphan-scan skipper filer som tilhører disse
+  // (parsed eventId fra path). Beskytter mot sletting av media i ikke-aktiverte
+  // eller refunderte events.
+  inactiveEventIds: Set<string>;
 }
 
 import { extractGcsPath } from "./gcs.js";
@@ -126,6 +139,7 @@ export async function loadDbReferences(graceDays: number): Promise<DbReferences>
   const imagePaths = new Set<string>();
   const coverPaths = new Set<string>();
   const v2EventMediaPairs = new Set<string>();
+  const inactiveEventIds = new Set<string>();
 
   // event_images.image_url — ta ALLE rader (også purged, så vi ikke re-prosesserer
   // filer som allerede er markert purged hvis GCS-sletting feilet sist).
@@ -155,9 +169,15 @@ export async function loadDbReferences(graceDays: number): Promise<DbReferences>
     if (path) coverPaths.add(path);
   }
 
+  // events med active=false — orphan-scan skipper filer for disse event_ids
+  const inactiveResult = await pool.query<{ event_id: string }>(
+    `SELECT event_id FROM events WHERE active = false`,
+  );
+  for (const row of inactiveResult.rows) inactiveEventIds.add(row.event_id);
+
   console.log(
-    `[DB-REFS] Loaded ${imagePaths.size} image paths, ${coverPaths.size} cover paths, ${v2EventMediaPairs.size} v2 event/media pairs`,
+    `[DB-REFS] Loaded ${imagePaths.size} image paths, ${coverPaths.size} cover paths, ${v2EventMediaPairs.size} v2 event/media pairs, ${inactiveEventIds.size} inactive event_ids`,
   );
 
-  return { imagePaths, coverPaths, v2EventMediaPairs };
+  return { imagePaths, coverPaths, v2EventMediaPairs, inactiveEventIds };
 }

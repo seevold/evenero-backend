@@ -287,6 +287,63 @@ export async function verifyOrphans(orphans: OrphanCandidate[]): Promise<VerifyR
   return report;
 }
 
+// Definitive sjekk: for HVER orphan, gjør eksakt path-match mot event_images.image_url
+// og events.event_photo. Hvis en orphan-path matcher en av disse → den ER referert
+// og ikke en ekte orphan.
+//
+// Bygges som én bulk-query med VALUES-liste for å unngå 10k round-trips.
+// Hvis NULL matches → bevist at ingen orphan er i et aktivt galleri.
+export async function exhaustiveExactMatchCheck(orphans: { path: string }[]): Promise<{
+  totalChecked: number;
+  matchedInEventImages: { path: string; image_url: string; event_id: string | null; archived: boolean | null; files_purged_at: Date | null }[];
+  matchedInCoverPhoto: { path: string; event_id: string; event_photo: string; deleted_at: Date | null }[];
+}> {
+  const result = {
+    totalChecked: orphans.length,
+    matchedInEventImages: [] as any[],
+    matchedInCoverPhoto: [] as any[],
+  };
+  if (orphans.length === 0) return result;
+
+  // Bygg full https-URL + raw path. event_images.image_url er https://...
+  // og det er ingen gs:// i prod-DB, men sjekk begge for paranoia.
+  const paths = orphans.map((o) => o.path);
+  const httpsUrls = paths.map((p) => `https://storage.googleapis.com/evenero-cloud/${p}`);
+
+  // ---- Sjekk event_images: exact match på image_url OR substring (i tilfelle av query-params) ----
+  const imgRows = await pool.query(
+    `SELECT ei.id, ei.event_id, ei.image_url, ei.archived, ei.files_purged_at, p.path AS matched_path
+     FROM event_images ei
+     JOIN (SELECT unnest($1::text[]) AS path, unnest($2::text[]) AS full_url) p
+       ON ei.image_url = p.full_url OR ei.image_url LIKE '%' || p.path || '%'`,
+    [paths, httpsUrls],
+  );
+  result.matchedInEventImages = imgRows.rows.map((r: any) => ({
+    path: r.matched_path,
+    image_url: r.image_url,
+    event_id: r.event_id,
+    archived: r.archived,
+    files_purged_at: r.files_purged_at,
+  }));
+
+  // ---- Sjekk events.event_photo ----
+  const coverRows = await pool.query(
+    `SELECT e.event_id, e.event_photo, e.deleted_at, p.path AS matched_path
+     FROM events e
+     JOIN (SELECT unnest($1::text[]) AS path, unnest($2::text[]) AS full_url) p
+       ON e.event_photo = p.full_url OR e.event_photo LIKE '%' || p.path || '%'`,
+    [paths, httpsUrls],
+  );
+  result.matchedInCoverPhoto = coverRows.rows.map((r: any) => ({
+    path: r.matched_path,
+    event_id: r.event_id,
+    event_photo: r.event_photo,
+    deleted_at: r.deleted_at,
+  }));
+
+  return result;
+}
+
 export function printVerifyReport(report: VerifyReport) {
   console.log("==========================================================");
   console.log("[VERIFY] Orphan classification cross-check");
