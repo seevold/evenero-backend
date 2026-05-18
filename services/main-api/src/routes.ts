@@ -123,7 +123,12 @@ function getBaseUrl(req: any): string {
 function generateToken(email: string): string {
   const payload = {
     email,
-    exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24 hours
+    // 30 dager matcher klient-side "remember device"-UI ([auth.ts saveDeviceSession]
+    // setter expiresAt = now + 30d). Tidligere ga vi ut 24t-tokens som utløp lenge
+    // før remembered-device-perioden — brukere måtte gjennom PIN-flyt hver dag selv
+    // om UI lovte 30 dager. Ingen refresh-mekanisme finnes, så token-levetiden må
+    // selv matche ønsket session-lengde.
+    exp: Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60)
   };
   return jwt.sign(payload, JWT_SECRET, { algorithm: 'HS256' });
 }
