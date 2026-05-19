@@ -226,8 +226,9 @@ export type PrintAddon = {
   slug: string;                            // 'premium_paper'
   label: Record<string, string>;           // {no:'Premium dobbelsidig matt', en:'...'}
   description: Record<string, string>;     // forklaring for tooltip / detalj
-  surcharge_minor: number;                 // NOK-øre, retail-tillegg
+  surcharge_minor: number;                 // NOK-øre, retail-tillegg (kan være negativ)
   gelato_uid_override?: string;            // hvis valgt: bytt SKU
+  conflictsWith?: string[];                // slugs til addons som ikke kan velges sammen
 };
 
 // ─────────────────────────────────────────────────────────────────────────

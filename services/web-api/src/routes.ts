@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { type InsertPayment, insertSupportRequestSchema } from "@shared/schema";
 import { emailService } from "./email-service";
 import { trackInitiateCheckout, trackPurchase } from "./meta-conversions";
+import { registerPrintRoutes } from "./print/routes";
 
 if (!process.env.STRIPE_SECRET_KEY) {
   throw new Error('Missing required Stripe secret: STRIPE_SECRET_KEY');
@@ -286,6 +287,9 @@ async function handleDisputeClosed(dispute: any): Promise<void> {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Print-on-demand ruter (Gelato-integrasjon)
+  registerPrintRoutes(app);
+
   // Stripe webhook endpoint - must be before other middleware that parses body
   app.post('/api/webhooks/stripe', async (req, res) => {
     const sig = req.headers['stripe-signature'];
