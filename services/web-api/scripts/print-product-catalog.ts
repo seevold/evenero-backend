@@ -24,8 +24,9 @@ export type ProductAddonDef = {
   slug: string;
   label: Record<string, string>;
   description: Record<string, string>;
-  surchargeMinor: number;
+  surchargeMinor: number;            // kan være negativ (rabatt)
   gelatoUidOverride?: string;
+  conflictsWith?: string[];          // slugs til addons som ikke kan velges sammen
 };
 
 export type ProductDef = {
@@ -132,6 +133,24 @@ export const PRODUCTS: ProductDef[] = [
     ],
     addons: [
       {
+        slug: "single_sided",
+        label: {
+          no: "Kun trykk på forsiden",
+          en: "Front side only",
+          sv: "Endast tryck på framsidan",
+          es: "Solo impresión frontal",
+        },
+        description: {
+          no: "Bakside forblir blank — sparer 50 kr",
+          en: "Back stays blank — saves 50 kr",
+          sv: "Baksidan förblir blank — sparar 50 kr",
+          es: "Reverso en blanco — ahorra 50 kr",
+        },
+        surchargeMinor: -5000, // −50 kr
+        gelatoUidOverride: "cards_pf_bc_pt_350-gsm-coated-silk_cl_4-0_ct_matt-protection_hor",
+        conflictsWith: ["premium_paper"],
+      },
+      {
         slug: "premium_paper",
         label: {
           no: "Premium dobbelsidig matt",
@@ -147,6 +166,7 @@ export const PRODUCTS: ProductDef[] = [
         },
         surchargeMinor: 10000, // +100 kr
         gelatoUidOverride: "cards_pf_bc_pt_350-gsm-coated-silk_cl_4-4_ct_matt-protection_prt_1-1_hor",
+        conflictsWith: ["single_sided"],
       },
     ],
     expressSurchargeMinor: 5000,
@@ -179,6 +199,8 @@ export const PRODUCTS: ProductDef[] = [
   },
 
   // ─── SQUARE KORT 14.1 × 14.1 cm ────────────────────────────────────────
+  // Gelato priser enkel og dobbel-sidet square likt — vi tilbyr enkel som
+  // valg uten rabatt (kunden velger basert på design-behov, ikke pris).
   {
     slug: "card_sq_14",
     categorySlug: "card_sq",
@@ -190,6 +212,25 @@ export const PRODUCTS: ProductDef[] = [
       { qty: 25 },
       { qty: 50 },
       { qty: 100 },
+    ],
+    addons: [
+      {
+        slug: "single_sided",
+        label: {
+          no: "Kun trykk på forsiden",
+          en: "Front side only",
+          sv: "Endast tryck på framsidan",
+          es: "Solo impresión frontal",
+        },
+        description: {
+          no: "Bakside forblir blank — samme pris",
+          en: "Back stays blank — same price",
+          sv: "Baksidan förblir blank — samma pris",
+          es: "Reverso en blanco — mismo precio",
+        },
+        surchargeMinor: 0,
+        gelatoUidOverride: "cards_pf_sq_pt_350-gsm-uncoated_cl_4-0_hor",
+      },
     ],
     expressSurchargeMinor: 5000,
     markupTargetPct: 60,
