@@ -135,8 +135,14 @@ export async function fulfillOrder(orderId: string): Promise<FulfillResult> {
     // 2. Submit til Gelato med vår orderReferenceId som idempotency
     const addr = order.shipping_address as Record<string, string>;
     const gelato = gelatoFromEnv();
+    // Draft-mode: staging-miljø bruker dette for å unngå faktisk print/fakturering
+    // under test. Settes via GELATO_DRAFT_MODE env-var.
+    const orderType = process.env.GELATO_DRAFT_MODE === "true" ? "draft" : "order";
+    if (orderType === "draft") {
+      console.log(`[fulfill] DRAFT MODE — Gelato vil ikke faktisk printe/sende`);
+    }
     const resp = await gelato.createOrder({
-      orderType: "order",
+      orderType,
       orderReferenceId: order.gelato_order_reference_id,
       customerReferenceId: order.order_number,
       currency: order.currency.toUpperCase(),
