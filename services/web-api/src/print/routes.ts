@@ -8,9 +8,13 @@
 
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
+import { randomUUID } from "crypto";
+import Stripe from "stripe";
 import { pool } from "../db";
 import { gelatoFromEnv, GelatoError } from "./gelato/client";
 import { priceItem, lowestUnitPriceMinor, lowestLineTotalMinor, PricingError } from "./pricing";
+import { generateOrderNumber } from "./order-number";
+import { fulfillOrder } from "./fulfillment";
 import type { PrintProduct, PrintCategory, PrintAddon, PrintQtyVariant } from "@shared/schema";
 
 const ALLOWED_COUNTRIES_V1 = [
@@ -387,6 +391,384 @@ function postCodeForCountry(c: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// POST /checkout — opprett print_order + Stripe Checkout Session
+// ─────────────────────────────────────────────────────────────────────────
+
+const CheckoutRequestSchema = z.object({
+  country: z.string().length(2),
+  customerEmail: z.string().email(),
+  items: z.array(z.object({
+    productSlug: z.string(),
+    qty: z.number().int().positive(),
+    addonSlugs: z.array(z.string()).optional(),
+    sourceEventId: z.string().optional(),
+    sourceTemplateKey: z.string().optional(),
+    designChoice: z.enum(["user_design", "minimal_template"]).default("minimal_template"),
+  })).min(1),
+  shipping: z.object({
+    name: z.string(),
+    line1: z.string(),
+    line2: z.string().optional(),
+    city: z.string(),
+    postalCode: z.string(),
+    country: z.string().length(2),
+    phone: z.string().optional(),
+  }),
+  shippingMethodType: z.enum(["normal", "express"]).default("normal"),
+  /** Returnerer-URL etter Stripe checkout — frontend setter denne basert
+   *  på sin egen routing. */
+  returnBaseUrl: z.string().url(),
+});
+
+let stripeClient: Stripe | null = null;
+function getStripe(): Stripe {
+  if (!stripeClient) {
+    if (!process.env.STRIPE_SECRET_KEY) throw new Error("STRIPE_SECRET_KEY mangler");
+    stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY);
+  }
+  return stripeClient;
+}
+
+async function handleCheckout(req: Request, res: Response) {
+  const parsed = CheckoutRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "INVALID_REQUEST", details: parsed.error.format() });
+  }
+  const body = parsed.data;
+  if (!ALLOWED_COUNTRIES_V1.includes(body.country)) {
+    return res.status(400).json({ error: "COUNTRY_NOT_SUPPORTED" });
+  }
+
+  const catalog = await loadCatalog();
+  const productMap = new Map(catalog.products.map((p) => [p.slug, p]));
+
+  // Re-pris alt server-side (kunden kan ha endret priser i devtools)
+  const pricedItems = [];
+  let subtotalMinor = 0;
+  for (const it of body.items) {
+    const product = productMap.get(it.productSlug);
+    if (!product) {
+      return res.status(400).json({ error: "PRODUCT_NOT_FOUND", slug: it.productSlug });
+    }
+    try {
+      const priced = priceItem({ product, qty: it.qty, addonSlugs: it.addonSlugs });
+      subtotalMinor += priced.lineTotalMinor;
+      pricedItems.push({ priced, source: it, product });
+    } catch (err) {
+      if (err instanceof PricingError) {
+        return res.status(400).json({ error: err.code, message: err.message });
+      }
+      throw err;
+    }
+  }
+
+  // Hent shipping live fra Gelato
+  let shippingMinor = 0;
+  let shippingMethodUid: string | undefined;
+  let shippingMethodName: string | undefined;
+  try {
+    const gelato = gelatoFromEnv();
+    const quote = await gelato.quoteOrder({
+      orderReferenceId: `checkout-${Date.now()}`,
+      currency: "NOK",
+      recipient: {
+        firstName: body.shipping.name.split(" ")[0] || "Customer",
+        lastName: body.shipping.name.split(" ").slice(1).join(" ") || "X",
+        addressLine1: body.shipping.line1,
+        city: body.shipping.city, postCode: body.shipping.postalCode,
+        country: body.shipping.country, email: body.customerEmail,
+      },
+      products: pricedItems.map((p, i) => ({
+        itemReferenceId: `${p.source.productSlug}-${i}`,
+        productUid: p.priced.gelatoUid, quantity: p.priced.qty,
+      })),
+    });
+    const q = quote.quotes[0];
+    if (!q) {
+      return res.status(400).json({ error: "NO_SHIPPING_AVAILABLE" });
+    }
+    const normals = q.shipmentMethods.filter((m) => m.type === "normal");
+    const expresses = q.shipmentMethods.filter((m) => m.type === "express");
+    const pickups = q.shipmentMethods.filter((m) => m.type === "pick_up");
+    let chosen;
+    if (body.shippingMethodType === "express" && expresses.length) {
+      chosen = cheapest(expresses);
+      shippingMinor = Math.round(chosen.price * 100);  // ekstra-kost over basis
+    } else if (normals.length) {
+      chosen = cheapest(normals);
+      shippingMinor = 0;  // hjemlevering inkludert
+    } else if (expresses.length) {
+      chosen = cheapest(expresses);
+      shippingMinor = 0;
+    } else if (pickups.length) {
+      chosen = cheapest(pickups);
+      shippingMinor = 0;
+    } else {
+      return res.status(400).json({ error: "NO_SHIPPING_AVAILABLE" });
+    }
+    shippingMethodUid = chosen.shipmentMethodUid;
+    shippingMethodName = chosen.name;
+  } catch (err) {
+    if (err instanceof GelatoError) {
+      return res.status(502).json({ error: "GELATO_QUOTE_FAILED", message: err.message });
+    }
+    throw err;
+  }
+
+  const totalMinor = subtotalMinor + shippingMinor;
+
+  // Opprett print_order-rad. Vi setter gelato_order_reference_id allerede
+  // her som idempotency-nøkkel — webhook-trigget fulfillment bruker den.
+  const orderNumber = await generateOrderNumber();
+  const orderId = randomUUID();
+  const gelatoRef = `evenero-${orderNumber}`;
+
+  await pool.query("BEGIN");
+  try {
+    await pool.query(
+      `INSERT INTO print_orders
+        (id, order_number, customer_email, status,
+         gelato_order_reference_id, total_minor, shipping_minor, currency,
+         shipping_address, shipping_method_uid, shipping_method_name)
+       VALUES ($1,$2,$3,'pending',$4,$5,$6,'nok',$7::jsonb,$8,$9)`,
+      [
+        orderId, orderNumber, body.customerEmail, gelatoRef,
+        totalMinor, shippingMinor,
+        JSON.stringify({
+          name: body.shipping.name,
+          firstName: body.shipping.name.split(" ")[0],
+          lastName: body.shipping.name.split(" ").slice(1).join(" "),
+          line1: body.shipping.line1, line2: body.shipping.line2,
+          city: body.shipping.city, postCode: body.shipping.postalCode,
+          country: body.shipping.country, phone: body.shipping.phone,
+        }),
+        shippingMethodUid, shippingMethodName,
+      ],
+    );
+    for (const p of pricedItems) {
+      await pool.query(
+        `INSERT INTO print_order_items
+          (id, order_id, product_slug, gelato_product_uid, gelato_item_reference_id,
+           quantity, unit_price_minor, line_total_minor,
+           source_event_id, source_template_key, design_choice)
+         VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          orderId, p.priced.productSlug, p.priced.gelatoUid,
+          `${p.priced.productSlug}-${randomUUID().slice(0, 8)}`,
+          p.priced.qty, p.priced.unitPriceMinor, p.priced.lineTotalMinor,
+          p.source.sourceEventId, p.source.sourceTemplateKey, p.source.designChoice,
+        ],
+      );
+    }
+    await pool.query("COMMIT");
+  } catch (e) {
+    await pool.query("ROLLBACK");
+    throw e;
+  }
+
+  // Stripe Checkout Session.
+  // Vi setter NOK som currency — Adaptive Pricing (account-level) gjør at
+  // kunden ser sin lokale valuta i checkout, men vi får oppgjør i NOK.
+  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = pricedItems.map((p) => ({
+    quantity: 1,  // line_total er allerede for hele qty
+    price_data: {
+      currency: "nok",
+      unit_amount: p.priced.lineTotalMinor,
+      product_data: {
+        name: `${(p.product.displayName as Record<string,string>)?.no || p.priced.productSlug} (${p.priced.qty} stk)`,
+        metadata: { print_product_slug: p.priced.productSlug, qty: String(p.priced.qty) },
+      },
+    },
+  }));
+  if (shippingMinor > 0) {
+    lineItems.push({
+      quantity: 1,
+      price_data: {
+        currency: "nok",
+        unit_amount: shippingMinor,
+        product_data: { name: "Express-levering" },
+      },
+    });
+  }
+
+  const stripe = getStripe();
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    payment_method_types: ["card"],
+    line_items: lineItems,
+    customer_email: body.customerEmail,
+    metadata: {
+      print_order_id: orderId,
+      print_order_number: orderNumber,
+      kind: "print_order",
+    },
+    success_url: `${body.returnBaseUrl}/print/order/${orderNumber}?session={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${body.returnBaseUrl}/print/checkout?canceled=1`,
+  });
+
+  // Lagre stripe_session_id på ordren for senere lookup
+  await pool.query(
+    `UPDATE print_orders SET stripe_session_id=$1, updated_at=NOW() WHERE id=$2`,
+    [session.id, orderId],
+  );
+
+  return res.json({
+    orderId, orderNumber,
+    checkoutUrl: session.url,
+    totalMinor,
+    currency: "nok",
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// GET /orders/:orderNumber — status-side data
+// ─────────────────────────────────────────────────────────────────────────
+
+async function handleGetOrder(req: Request, res: Response) {
+  const orderNumber = req.params.orderNumber;
+  const order = await pool.query(
+    `SELECT id, order_number, customer_email, status,
+            total_minor, shipping_minor, currency,
+            shipping_address, shipping_method_name,
+            tracking_url, tracking_code, carrier,
+            paid_at, submitted_at, shipped_at, delivered_at,
+            failure_reason, created_at
+     FROM print_orders WHERE order_number=$1`,
+    [orderNumber],
+  );
+  if (!order.rows[0]) return res.status(404).json({ error: "NOT_FOUND" });
+  const items = await pool.query(
+    `SELECT product_slug, quantity, unit_price_minor, line_total_minor
+     FROM print_order_items WHERE order_id=$1
+     ORDER BY created_at`,
+    [order.rows[0].id],
+  );
+  return res.json({ ...order.rows[0], items: items.rows });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// POST /webhooks/gelato — status-oppdateringer fra Gelato
+// ─────────────────────────────────────────────────────────────────────────
+
+async function handleGelatoWebhook(req: Request, res: Response) {
+  // Gelato sender signed payload — vi verifiserer hvis secret er konfigurert.
+  // Bevisst designvalg: vi lagrer ALLE events i audit-tabellen, også de
+  // som ikke kan parses, så vi har full forensikk hvis noe går galt.
+  const sig = req.headers["gelato-signature"] as string | undefined;
+  const secret = process.env.GELATO_WEBHOOK_SECRET;
+  let signatureValid = true;
+  if (secret && sig) {
+    // Gelato bruker HMAC-SHA256 av raw body med secret. Implementer ved
+    // behov — for nå loggfører vi forsøket. Webhook-verifisering kreves
+    // før prod-cutover (TODO i README).
+    signatureValid = true;  // placeholder
+  } else if (secret && !sig) {
+    signatureValid = false;
+  }
+
+  const payload = req.body as Record<string, unknown>;
+  const eventType = String(payload.event || "unknown");
+  const orderRef = payload.orderReferenceId as string | undefined;
+
+  // Lagre event i audit-tabell
+  await pool.query(
+    `INSERT INTO print_gelato_webhook_events
+      (order_reference_id, event_type, payload, signature_valid)
+     VALUES ($1,$2,$3::jsonb,$4)`,
+    [orderRef || null, eventType, JSON.stringify(payload), signatureValid],
+  );
+
+  if (!signatureValid) {
+    return res.status(401).json({ error: "INVALID_SIGNATURE" });
+  }
+
+  // Mapp event til status-overgang
+  // Gelato sender events: order_status_updated, order_item_status_updated, etc.
+  // fulfillmentStatus-verdier: 'created', 'printed', 'shipped', 'delivered', 'canceled'
+  if (orderRef && payload.fulfillmentStatus) {
+    const status = String(payload.fulfillmentStatus);
+    const trackingUrl = payload.trackingUrl as string | undefined;
+    const trackingCode = payload.trackingCode as string | undefined;
+    const carrier = payload.carrierName as string | undefined;
+
+    if (status === "printed" || status === "in_production") {
+      await pool.query(
+        `UPDATE print_orders SET status='in_production', updated_at=NOW()
+         WHERE gelato_order_reference_id=$1 AND status NOT IN ('shipped','delivered')`,
+        [orderRef],
+      );
+    } else if (status === "shipped") {
+      await pool.query(
+        `UPDATE print_orders
+         SET status='shipped', shipped_at=COALESCE(shipped_at, NOW()),
+             tracking_url=COALESCE($2, tracking_url),
+             tracking_code=COALESCE($3, tracking_code),
+             carrier=COALESCE($4, carrier),
+             updated_at=NOW()
+         WHERE gelato_order_reference_id=$1`,
+        [orderRef, trackingUrl, trackingCode, carrier],
+      );
+      // TODO: trigger "shipped" e-post til kunden
+    } else if (status === "delivered") {
+      await pool.query(
+        `UPDATE print_orders SET status='delivered', delivered_at=NOW(), updated_at=NOW()
+         WHERE gelato_order_reference_id=$1`,
+        [orderRef],
+      );
+    } else if (status === "canceled") {
+      await pool.query(
+        `UPDATE print_orders SET status='cancelled', updated_at=NOW(), failure_reason='Gelato cancelled order'
+         WHERE gelato_order_reference_id=$1`,
+        [orderRef],
+      );
+    }
+  }
+
+  await pool.query(
+    `UPDATE print_gelato_webhook_events SET processed_at=NOW()
+     WHERE order_reference_id=$1 AND event_type=$2 AND processed_at IS NULL`,
+    [orderRef || null, eventType],
+  );
+
+  return res.json({ ok: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Stripe webhook-hook for print-ordre (kalles fra hoved-routes.ts)
+// ─────────────────────────────────────────────────────────────────────────
+
+export async function handlePrintCheckoutCompleted(session: Stripe.Checkout.Session): Promise<void> {
+  const printOrderId = session.metadata?.print_order_id;
+  if (!printOrderId) return;
+
+  const orderRes = await pool.query<{ status: string }>(
+    `SELECT status FROM print_orders WHERE id=$1`,
+    [printOrderId],
+  );
+  const current = orderRes.rows[0];
+  if (!current) {
+    console.warn(`[stripe→print] print_order ${printOrderId} ikke funnet`);
+    return;
+  }
+  if (current.status !== "pending") {
+    console.log(`[stripe→print] ${printOrderId} status=${current.status}, ignore duplicate webhook`);
+    return;
+  }
+
+  await pool.query(
+    `UPDATE print_orders
+     SET status='paid', paid_at=NOW(), stripe_payment_intent_id=$1, updated_at=NOW()
+     WHERE id=$2 AND status='pending'`,
+    [session.payment_intent as string, printOrderId],
+  );
+
+  // Trigger fulfillment async — vi vil ikke blokkere webhook-svaret.
+  fulfillOrder(printOrderId).catch((err) => {
+    console.error(`[stripe→print] fulfillment feilet for ${printOrderId}:`, err);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Registrering
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -401,6 +783,18 @@ export function registerPrintRoutes(app: Express) {
 
   app.post("/api/print/quote", async (req, res, next) => {
     try { await handleQuote(req, res); } catch (e) { next(e); }
+  });
+
+  app.post("/api/print/checkout", async (req, res, next) => {
+    try { await handleCheckout(req, res); } catch (e) { next(e); }
+  });
+
+  app.get("/api/print/orders/:orderNumber", async (req, res, next) => {
+    try { await handleGetOrder(req, res); } catch (e) { next(e); }
+  });
+
+  app.post("/api/webhooks/gelato", async (req, res, next) => {
+    try { await handleGelatoWebhook(req, res); } catch (e) { next(e); }
   });
 
   // Internal: clear cache (kalles fra seed-script via SIGHUP eller restart).

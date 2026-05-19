@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { type InsertPayment, insertSupportRequestSchema } from "@shared/schema";
 import { emailService } from "./email-service";
 import { trackInitiateCheckout, trackPurchase } from "./meta-conversions";
-import { registerPrintRoutes } from "./print/routes";
+import { registerPrintRoutes, handlePrintCheckoutCompleted } from "./print/routes";
 
 if (!process.env.STRIPE_SECRET_KEY) {
   throw new Error('Missing required Stripe secret: STRIPE_SECRET_KEY');
@@ -163,6 +163,14 @@ async function readProductMetaFromSession(session: any): Promise<ProductMeta> {
 
 async function handleCheckoutSessionCompleted(session: any): Promise<void> {
   console.log(`[webhook] checkout.session.completed: ${session.id} email=${session.customer_details?.email}`);
+
+  // Print-on-demand-ordrer rutes til egen handler — separat state machine,
+  // egen DB-tabell, ingen interaksjon med event_credit/payments.
+  if (session.metadata?.kind === 'print_order') {
+    console.log(`[webhook] → print_order branch (order_id=${session.metadata.print_order_id})`);
+    await handlePrintCheckoutCompleted(session);
+    return;
+  }
 
   if (!session.payment_intent || typeof session.payment_intent !== 'string') {
     console.log(`[webhook] no payment_intent in session ${session.id}, skipping`);
