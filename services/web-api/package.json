@@ -8,7 +8,8 @@
     "dev": "tsx --watch src/index.ts",
     "build": "esbuild src/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist --target=node20",
     "start": "node dist/index.js",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "print:seed": "tsx scripts/seed-print-products.ts"
   },
   "dependencies": {
     "@google-cloud/cloud-sql-connector": "^1.5.1",
