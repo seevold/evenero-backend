@@ -43,6 +43,19 @@ export type ProductDef = {
   allowedCountries?: string[];
   relatedProductSlugs?: string[];
   pdfRenderer?: string;
+  /** Multiplier for displaying qty to user. F.eks. postkort sold per
+   *  pack-of-10 → packSize=10, så qty=1 vises som "10 kort". */
+  packSize?: number;
+  /** Tillater custom qty over minste tier. F.eks. visitkort kan bestilles
+   *  i custom-antall mellom break-points. */
+  allowCustomQty?: boolean;
+  /** Detaljert produkt-info vist i UI (matcher Gelato-spec). */
+  productInfo?: {
+    paper?: Record<string, string>;          // {no, en, ...} — "350gsm coated silk, matt-lamiert"
+    sides?: Record<string, string>;          // "Trykk på begge sider"
+    finishing?: Record<string, string>;      // "Matt-lamiering"
+    deliveryDays?: Record<string, string>;   // "3-5 hverdager"
+  };
   metadata?: Record<string, unknown>;
 };
 
@@ -125,6 +138,13 @@ export const PRODUCTS: ProductDef[] = [
     displayName: { no: "Visitkort", en: "Business cards", sv: "Visitkort", es: "Tarjetas de visita" },
     widthMm: 90, heightMm: 55,
     defaultGelatoUid: "cards_pf_bc_pt_350-gsm-coated-silk_cl_4-4_ct_matt-protection_hor",
+    allowCustomQty: true,
+    productInfo: {
+      paper: { no: "350 g/m² coated silk", en: "350 gsm coated silk", sv: "350 g/m² coated silk", es: "350 g/m² coated silk" },
+      sides: { no: "Trykk på begge sider", en: "Double-sided print", sv: "Tryck på båda sidor", es: "Impresión doble cara" },
+      finishing: { no: "Matt-beskyttende lakk", en: "Matt protective coating", sv: "Matt skyddande lack", es: "Acabado mate protector" },
+      deliveryDays: { no: "3-5 hverdager", en: "3-5 business days", sv: "3-5 vardagar", es: "3-5 días hábiles" },
+    },
     variants: [
       { qty: 50,  recommended: true },
       { qty: 100 },
@@ -177,16 +197,22 @@ export const PRODUCTS: ProductDef[] = [
   },
 
   // ─── POSTKORT A6 (10.5 × 14.8 cm, pack of 10) ──────────────────────────
-  // qty her er ANTALL PAKKER. 1 pack = 10 kort.
+  // packSize=10 → frontend viser qty multiplisert (1 pack = "10 kort").
   {
     slug: "postcard_a6",
     categorySlug: "postcard",
     displayName: { no: "Postkort A6", en: "A6 postcards", sv: "A6-vykort", es: "Postales A6" },
     widthMm: 105, heightMm: 148,
     defaultGelatoUid: "pack_of_cards_qt_10_pcs_pf_a6_upt_350-gsm-130lb-coated-silk_cl_4-4_ct_none_prt_none_sft_none_set_none_hor",
+    packSize: 10,
+    productInfo: {
+      paper: { no: "350 g/m² coated silk", en: "350 gsm coated silk", sv: "350 g/m² coated silk", es: "350 g/m² coated silk" },
+      sides: { no: "Trykk på begge sider", en: "Double-sided print", sv: "Tryck på båda sidor", es: "Impresión doble cara" },
+      finishing: { no: "Silke-glanset finish", en: "Silk-coated finish", sv: "Silke-finish", es: "Acabado satinado" },
+      deliveryDays: { no: "3-5 hverdager", en: "3-5 business days", sv: "3-5 vardagar", es: "3-5 días hábiles" },
+    },
     variants: [
       { qty: 1,  recommended: true },  // 10 kort
-      { qty: 2 },                       // 20 kort
       { qty: 3 },                       // 30 kort
       { qty: 5 },                       // 50 kort
       { qty: 10 },                      // 100 kort
@@ -207,6 +233,12 @@ export const PRODUCTS: ProductDef[] = [
     displayName: { no: "Square kort", en: "Square cards", sv: "Fyrkantiga kort", es: "Tarjetas cuadradas" },
     widthMm: 141, heightMm: 141,
     defaultGelatoUid: "cards_pf_sq_pt_350-gsm-uncoated_cl_4-4_hor",
+    allowCustomQty: true,
+    productInfo: {
+      paper: { no: "350 g/m² ubelagt papir", en: "350 gsm uncoated", sv: "350 g/m² obestruket", es: "350 g/m² sin recubrir" },
+      sides: { no: "Trykk på begge sider", en: "Double-sided print", sv: "Tryck på båda sidor", es: "Impresión doble cara" },
+      deliveryDays: { no: "3-5 hverdager", en: "3-5 business days", sv: "3-5 vardagar", es: "3-5 días hábiles" },
+    },
     variants: [
       { qty: 10, recommended: true },
       { qty: 25 },
@@ -253,6 +285,12 @@ export const PRODUCTS: ProductDef[] = [
     markupTargetPct: 60,
     allowedCountries: ALL_COUNTRIES_V1,
     relatedProductSlugs: REL_POSTER_2x3,
+    productInfo: {
+      paper: { no: "200 g/m² coated silk", en: "200 gsm coated silk", sv: "200 g/m² coated silk", es: "200 g/m² coated silk" },
+      sides: { no: "Trykk på én side", en: "Single-sided print", sv: "Tryck på en sida", es: "Impresión de una cara" },
+      finishing: { no: "Silke-glanset finish", en: "Silk-coated finish", sv: "Silke-finish", es: "Acabado satinado" },
+      deliveryDays: { no: "3-5 hverdager", en: "3-5 business days", sv: "3-5 vardagar", es: "3-5 días hábiles" },
+    },
     metadata: { bleedMm: 3, dpi: 300, paperGrammage: 200 },
   },
   {
@@ -268,6 +306,12 @@ export const PRODUCTS: ProductDef[] = [
     markupTargetPct: 60,
     allowedCountries: ALL_COUNTRIES_V1,
     relatedProductSlugs: REL_POSTER_2x3,
+    productInfo: {
+      paper: { no: "200 g/m² coated silk", en: "200 gsm coated silk", sv: "200 g/m² coated silk", es: "200 g/m² coated silk" },
+      sides: { no: "Trykk på én side", en: "Single-sided print", sv: "Tryck på en sida", es: "Impresión de una cara" },
+      finishing: { no: "Silke-glanset finish", en: "Silk-coated finish", sv: "Silke-finish", es: "Acabado satinado" },
+      deliveryDays: { no: "3-5 hverdager", en: "3-5 business days", sv: "3-5 vardagar", es: "3-5 días hábiles" },
+    },
     metadata: { bleedMm: 3, dpi: 300, paperGrammage: 200 },
   },
   {
@@ -283,6 +327,12 @@ export const PRODUCTS: ProductDef[] = [
     markupTargetPct: 60,
     allowedCountries: ALL_COUNTRIES_V1,
     relatedProductSlugs: REL_POSTER_2x3,
+    productInfo: {
+      paper: { no: "200 g/m² coated silk", en: "200 gsm coated silk", sv: "200 g/m² coated silk", es: "200 g/m² coated silk" },
+      sides: { no: "Trykk på én side", en: "Single-sided print", sv: "Tryck på en sida", es: "Impresión de una cara" },
+      finishing: { no: "Silke-glanset finish", en: "Silk-coated finish", sv: "Silke-finish", es: "Acabado satinado" },
+      deliveryDays: { no: "3-5 hverdager", en: "3-5 business days", sv: "3-5 vardagar", es: "3-5 días hábiles" },
+    },
     metadata: { bleedMm: 3, dpi: 300, paperGrammage: 200 },
   },
   // (Plakat 80×120 droppet — eksisterer ikke i Gelato posters-katalog. Kan
@@ -302,6 +352,12 @@ export const PRODUCTS: ProductDef[] = [
     markupTargetPct: 60,
     allowedCountries: ALL_COUNTRIES_V1,
     relatedProductSlugs: REL_POSTER_1x1,
+    productInfo: {
+      paper: { no: "200 g/m² coated silk", en: "200 gsm coated silk", sv: "200 g/m² coated silk", es: "200 g/m² coated silk" },
+      sides: { no: "Trykk på én side", en: "Single-sided print", sv: "Tryck på en sida", es: "Impresión de una cara" },
+      finishing: { no: "Silke-glanset finish", en: "Silk-coated finish", sv: "Silke-finish", es: "Acabado satinado" },
+      deliveryDays: { no: "3-5 hverdager", en: "3-5 business days", sv: "3-5 vardagar", es: "3-5 días hábiles" },
+    },
     metadata: { bleedMm: 3, dpi: 300, paperGrammage: 200 },
   },
   {
@@ -317,6 +373,12 @@ export const PRODUCTS: ProductDef[] = [
     markupTargetPct: 60,
     allowedCountries: ALL_COUNTRIES_V1,
     relatedProductSlugs: REL_POSTER_1x1,
+    productInfo: {
+      paper: { no: "200 g/m² coated silk", en: "200 gsm coated silk", sv: "200 g/m² coated silk", es: "200 g/m² coated silk" },
+      sides: { no: "Trykk på én side", en: "Single-sided print", sv: "Tryck på en sida", es: "Impresión de una cara" },
+      finishing: { no: "Silke-glanset finish", en: "Silk-coated finish", sv: "Silke-finish", es: "Acabado satinado" },
+      deliveryDays: { no: "3-5 hverdager", en: "3-5 business days", sv: "3-5 vardagar", es: "3-5 días hábiles" },
+    },
     metadata: { bleedMm: 3, dpi: 300, paperGrammage: 200 },
   },
   {
@@ -332,6 +394,12 @@ export const PRODUCTS: ProductDef[] = [
     markupTargetPct: 55,
     allowedCountries: ALL_COUNTRIES_V1,
     relatedProductSlugs: REL_POSTER_1x1,
+    productInfo: {
+      paper: { no: "200 g/m² coated silk", en: "200 gsm coated silk", sv: "200 g/m² coated silk", es: "200 g/m² coated silk" },
+      sides: { no: "Trykk på én side", en: "Single-sided print", sv: "Tryck på en sida", es: "Impresión de una cara" },
+      finishing: { no: "Silke-glanset finish", en: "Silk-coated finish", sv: "Silke-finish", es: "Acabado satinado" },
+      deliveryDays: { no: "3-5 hverdager", en: "3-5 business days", sv: "3-5 vardagar", es: "3-5 días hábiles" },
+    },
     metadata: { bleedMm: 3, dpi: 300, paperGrammage: 200 },
   },
 ];

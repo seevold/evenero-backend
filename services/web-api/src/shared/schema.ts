@@ -101,6 +101,13 @@ export const printProducts = pgTable("print_products", {
   // Addons — valgfrie oppgraderinger som overstyrer SKU og/eller legger til kost.
   // [{ slug, label_no, label_en, description_no, surcharge_minor, gelato_uid_override? }]
   addons: jsonb("addons").notNull().default([]),
+  // packSize > 1 betyr at qty=1 representerer "1 pakke" = packSize fysiske enheter.
+  // Eks: postkort A6 med packSize=10 — qty=3 = 30 kort.
+  packSize: integer("pack_size").notNull().default(1),
+  // allowCustomQty: tillater UI å vise input-felt for custom-antall mellom break-points.
+  allowCustomQty: boolean("allow_custom_qty").notNull().default(false),
+  // productInfo: { paper, sides, finishing, deliveryDays } — alle som {no,en,sv,es}
+  productInfo: jsonb("product_info"),
   // Generelt metadata: { bleed_mm, dpi, paper_thickness_g, ... }
   metadata: jsonb("metadata"),
   lastPriceRefreshAt: timestamp("last_price_refresh_at"),

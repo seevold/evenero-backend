@@ -55,7 +55,9 @@ async function loadCatalog(): Promise<CatalogCache> {
             markup_target_pct AS "markupTargetPct",
             allowed_countries AS "allowedCountries",
             related_product_slugs AS "relatedProductSlugs",
-            pdf_renderer AS "pdfRenderer", addons, metadata,
+            pdf_renderer AS "pdfRenderer", addons,
+            pack_size AS "packSize", allow_custom_qty AS "allowCustomQty",
+            product_info AS "productInfo", metadata,
             last_price_refresh_at AS "lastPriceRefreshAt",
             active, created_at AS "createdAt", updated_at AS "updatedAt"
      FROM print_products WHERE active`,
@@ -112,6 +114,14 @@ interface CatalogResponseProduct {
   expressSurchargeMinor: number;
   allowedCountries: string[];
   relatedProductSlugs: string[];
+  packSize: number;
+  allowCustomQty: boolean;
+  productInfo: {
+    paper?: Record<string, string>;
+    sides?: Record<string, string>;
+    finishing?: Record<string, string>;
+    deliveryDays?: Record<string, string>;
+  } | null;
   metadata: Record<string, unknown> | null;
 }
 
@@ -145,6 +155,9 @@ function buildCatalogResponse(catalog: CatalogCache, country?: string) {
         expressSurchargeMinor: p.expressSurchargeMinor,
         allowedCountries: p.allowedCountries || [],
         relatedProductSlugs: p.relatedProductSlugs || [],
+        packSize: (p as unknown as { packSize: number }).packSize || 1,
+        allowCustomQty: (p as unknown as { allowCustomQty: boolean }).allowCustomQty || false,
+        productInfo: (p as unknown as { productInfo: CatalogResponseProduct["productInfo"] }).productInfo || null,
         metadata: (p.metadata as Record<string, unknown>) || null,
       };
     });

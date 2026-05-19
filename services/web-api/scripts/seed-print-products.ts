@@ -207,16 +207,19 @@ async function upsertProduct(product: ProductDef, variants: ComputedVariant[]): 
     description: a.description,
     surcharge_minor: a.surchargeMinor,
     gelato_uid_override: a.gelatoUidOverride,
+    conflictsWith: a.conflictsWith,           // BUG: manglet før — frontend kunne ikke disable konflikter
   }));
   await pool.query(
     `INSERT INTO print_products
       (slug, category_slug, product_type, display_name, width_mm, height_mm,
        default_gelato_uid, qty_variants, express_surcharge_minor, markup_target_pct,
-       allowed_countries, related_product_slugs, pdf_renderer, addons, metadata,
+       allowed_countries, related_product_slugs, pdf_renderer, addons,
+       pack_size, allow_custom_qty, product_info, metadata,
        last_price_refresh_at, active, updated_at)
      VALUES ($1, $2, $3, $4::jsonb, $5, $6,
              $7, $8::jsonb, $9, $10,
-             $11, $12, $13, $14::jsonb, $15::jsonb,
+             $11, $12, $13, $14::jsonb,
+             $15, $16, $17::jsonb, $18::jsonb,
              NOW(), TRUE, NOW())
      ON CONFLICT (slug) DO UPDATE SET
        category_slug = EXCLUDED.category_slug,
@@ -231,6 +234,9 @@ async function upsertProduct(product: ProductDef, variants: ComputedVariant[]): 
        related_product_slugs = EXCLUDED.related_product_slugs,
        pdf_renderer = EXCLUDED.pdf_renderer,
        addons = EXCLUDED.addons,
+       pack_size = EXCLUDED.pack_size,
+       allow_custom_qty = EXCLUDED.allow_custom_qty,
+       product_info = EXCLUDED.product_info,
        metadata = EXCLUDED.metadata,
        last_price_refresh_at = NOW(),
        updated_at = NOW()`,
@@ -245,6 +251,9 @@ async function upsertProduct(product: ProductDef, variants: ComputedVariant[]): 
       product.relatedProductSlugs || null,
       product.pdfRenderer || "qr_simple",
       JSON.stringify(addonsForDb),
+      product.packSize || 1,
+      product.allowCustomQty || false,
+      product.productInfo ? JSON.stringify(product.productInfo) : null,
       product.metadata ? JSON.stringify(product.metadata) : null,
     ],
   );
