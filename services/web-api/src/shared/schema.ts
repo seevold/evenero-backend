@@ -98,6 +98,9 @@ export const printProducts = pgTable("print_products", {
   relatedProductSlugs: text("related_product_slugs").array(),
   // PDF-renderer — peker til kode-modul. v1: kun 'qr_simple'.
   pdfRenderer: text("pdf_renderer").notNull().default("qr_simple"),
+  // Addons — valgfrie oppgraderinger som overstyrer SKU og/eller legger til kost.
+  // [{ slug, label_no, label_en, description_no, surcharge_minor, gelato_uid_override? }]
+  addons: jsonb("addons").notNull().default([]),
   // Generelt metadata: { bleed_mm, dpi, paper_thickness_g, ... }
   metadata: jsonb("metadata"),
   lastPriceRefreshAt: timestamp("last_price_refresh_at"),
@@ -217,6 +220,14 @@ export type PrintQtyVariant = {
   retail_minor: number;         // NOK-øre
   recommended?: boolean;        // vis ⭐-badge
   upgrade_label?: string;       // 'Matt-lamiert' osv.
+};
+
+export type PrintAddon = {
+  slug: string;                            // 'premium_paper'
+  label: Record<string, string>;           // {no:'Premium dobbelsidig matt', en:'...'}
+  description: Record<string, string>;     // forklaring for tooltip / detalj
+  surcharge_minor: number;                 // NOK-øre, retail-tillegg
+  gelato_uid_override?: string;            // hvis valgt: bytt SKU
 };
 
 // ─────────────────────────────────────────────────────────────────────────

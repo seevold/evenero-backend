@@ -201,15 +201,22 @@ async function upsertProduct(product: ProductDef, variants: ComputedVariant[]): 
     }
     return;
   }
+  const addonsForDb = (product.addons || []).map((a) => ({
+    slug: a.slug,
+    label: a.label,
+    description: a.description,
+    surcharge_minor: a.surchargeMinor,
+    gelato_uid_override: a.gelatoUidOverride,
+  }));
   await pool.query(
     `INSERT INTO print_products
       (slug, category_slug, product_type, display_name, width_mm, height_mm,
        default_gelato_uid, qty_variants, express_surcharge_minor, markup_target_pct,
-       allowed_countries, related_product_slugs, pdf_renderer, metadata,
+       allowed_countries, related_product_slugs, pdf_renderer, addons, metadata,
        last_price_refresh_at, active, updated_at)
      VALUES ($1, $2, $3, $4::jsonb, $5, $6,
              $7, $8::jsonb, $9, $10,
-             $11, $12, $13, $14::jsonb,
+             $11, $12, $13, $14::jsonb, $15::jsonb,
              NOW(), TRUE, NOW())
      ON CONFLICT (slug) DO UPDATE SET
        category_slug = EXCLUDED.category_slug,
@@ -223,6 +230,7 @@ async function upsertProduct(product: ProductDef, variants: ComputedVariant[]): 
        allowed_countries = EXCLUDED.allowed_countries,
        related_product_slugs = EXCLUDED.related_product_slugs,
        pdf_renderer = EXCLUDED.pdf_renderer,
+       addons = EXCLUDED.addons,
        metadata = EXCLUDED.metadata,
        last_price_refresh_at = NOW(),
        updated_at = NOW()`,
@@ -236,6 +244,7 @@ async function upsertProduct(product: ProductDef, variants: ComputedVariant[]): 
       product.allowedCountries || null,
       product.relatedProductSlugs || null,
       product.pdfRenderer || "qr_simple",
+      JSON.stringify(addonsForDb),
       product.metadata ? JSON.stringify(product.metadata) : null,
     ],
   );

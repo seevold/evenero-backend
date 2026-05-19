@@ -15,9 +15,17 @@ export type CategoryDef = {
 
 export type ProductVariantDef = {
   qty: number;
-  gelatoUid?: string;          // overstyrer product.defaultGelatoUid (visitkort 10/50 swap)
+  gelatoUid?: string;          // overstyrer product.defaultGelatoUid
   recommended?: boolean;
   upgradeLabel?: string;
+};
+
+export type ProductAddonDef = {
+  slug: string;
+  label: Record<string, string>;
+  description: Record<string, string>;
+  surchargeMinor: number;
+  gelatoUidOverride?: string;
 };
 
 export type ProductDef = {
@@ -28,6 +36,7 @@ export type ProductDef = {
   heightMm: number;
   defaultGelatoUid: string;
   variants: ProductVariantDef[];
+  addons?: ProductAddonDef[];
   expressSurchargeMinor: number;
   markupTargetPct: number;
   allowedCountries?: string[];
@@ -104,22 +113,41 @@ const REL_POSTER_1x1     = ["businesscard_bc", "card_sq_14", "poster_2x3_30x40"]
 
 export const PRODUCTS: ProductDef[] = [
   // ─── VISITKORT (5.5 × 9 cm BC) ─────────────────────────────────────────
-  // Auto-SKU-swap: 10-25 stk → value (350gsm uncoated), 50+ stk → premium
-  // (130lb coated silk + matt lamiering). Premium har bedre pris ved 50+ pga
-  // batch-økonomi.
+  // Min 50 stk. Standard = 350gsm coated silk matt-protection (Gelato's
+  // tykkeste BC-papir). Addon "premium_paper" oppgraderer til dobbelsidig
+  // matt-protection (luksuriøst stoff i hånda).
+  // Gelato koster SAMME ved 50 stk uansett variant — addon-tillegget er ren
+  // margin som dekker fremtidige Gelato-prisøkninger.
   {
     slug: "businesscard_bc",
     categorySlug: "businesscard",
     displayName: { no: "Visitkort", en: "Business cards", sv: "Visitkort", es: "Tarjetas de visita" },
     widthMm: 90, heightMm: 55,
-    defaultGelatoUid: "cards_pf_bc_pt_130-lb-cover-coated-silk_cl_4-4_ct_matt-protection_hor",
+    defaultGelatoUid: "cards_pf_bc_pt_350-gsm-coated-silk_cl_4-4_ct_matt-protection_hor",
     variants: [
-      { qty: 10,  gelatoUid: "cards_pf_bc_pt_350-gsm-uncoated_cl_4-4_hor" },
-      { qty: 25,  gelatoUid: "cards_pf_bc_pt_350-gsm-uncoated_cl_4-4_hor" },
-      { qty: 50,  recommended: true, upgradeLabel: "Matt-lamiert" },
-      { qty: 100, upgradeLabel: "Matt-lamiert" },
-      { qty: 250, upgradeLabel: "Matt-lamiert" },
-      { qty: 500, upgradeLabel: "Matt-lamiert" },
+      { qty: 50,  recommended: true },
+      { qty: 100 },
+      { qty: 250 },
+      { qty: 500 },
+    ],
+    addons: [
+      {
+        slug: "premium_paper",
+        label: {
+          no: "Premium dobbelsidig matt",
+          en: "Premium double-sided matte",
+          sv: "Premium dubbelsidig matt",
+          es: "Premium mate doble cara",
+        },
+        description: {
+          no: "Matt-lamiering på begge sider — gir tykkere, luksuriøs følelse",
+          en: "Matt lamination on both sides — premium thickness and feel",
+          sv: "Matt-laminering på båda sidor — premiumkänsla",
+          es: "Laminado mate por ambos lados — sensación premium",
+        },
+        surchargeMinor: 10000, // +100 kr
+        gelatoUidOverride: "cards_pf_bc_pt_350-gsm-coated-silk_cl_4-4_ct_matt-protection_prt_1-1_hor",
+      },
     ],
     expressSurchargeMinor: 5000,
     markupTargetPct: 60,
