@@ -211,6 +211,18 @@ async function handleCheckoutSessionCompleted(session: any): Promise<void> {
   }
 
   // 2. Lagre payment-rad med full sporing
+  // Land og avgift hentes fra Stripe sin faktiske beregning ved betaling —
+  // ikke fra pre-checkout-metadata, som bygde på et upålitelig nettleser-gjett
+  // (tidssone/locale) og kunne feilklassifisere et norsk salg som f.eks. PL.
+  const vatAmount = session.total_details?.amount_tax ?? 0;
+  const baseAmount = (session.amount_total ?? paymentIntent.amount) - vatAmount;
+  const buyerCountry = session.customer_details?.address?.country
+    ?? session.metadata?.buyer_country
+    ?? null;
+  const vatRate = baseAmount > 0
+    ? String(Math.round((vatAmount / baseAmount) * 100))
+    : null;
+
   const paymentData: InsertPayment = {
     paymentIntentId: paymentIntent.id,
     stripeChargeId,
@@ -221,10 +233,10 @@ async function handleCheckoutSessionCompleted(session: any): Promise<void> {
     receiptUrl,
     referralId: session.metadata?.promotekit_referral || null,
     couponCode: session.metadata?.coupon_code || null,
-    buyerCountry: session.metadata?.buyer_country || null,
-    vatAmount: session.metadata?.vat_amount ? parseInt(session.metadata.vat_amount) : 0,
-    baseAmount: session.metadata?.base_amount ? parseInt(session.metadata.base_amount) : paymentIntent.amount,
-    vatRate: session.metadata?.vat_rate || null,
+    buyerCountry,
+    vatAmount,
+    baseAmount,
+    vatRate,
     metadata: session.metadata || null,
     productType: meta.productType,
     creditsGranted: meta.creditsGranted,
@@ -560,9 +572,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const stripeData = await getStripePriceData();
-      const country = (buyerCountry || 'NO').toUpperCase();
-      const currency = getCurrencyForCountry(country, stripeData.currencyOptions);
-      const unitAmount = stripeData.currencyOptions[currency] ?? stripeData.defaultAmount;
 
       // Validér customer_email før vi sender til Stripe — ugyldig format
       // gjør at hele session-creation feiler. Skip pre-fill hvis ugyldig.
@@ -571,14 +580,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? customerEmail.trim()
         : null;
 
+      // Bruk den persisterte Price-en, ikke inline price_data — Adaptive
+      // Pricing virker kun på et ekte Price-objekt, og lar Stripe velge
+      // presentment-valuta fra kundens lokasjon (samme kilde som skatt).
       const sessionData: any = {
         line_items: [
           {
-            price_data: {
-              currency,
-              product: STRIPE_PRODUCT_ID,
-              unit_amount: unitAmount,
-            },
+            price: stripeData.priceId,
             quantity: 1,
           },
         ],
