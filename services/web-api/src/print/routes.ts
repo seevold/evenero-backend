@@ -15,7 +15,7 @@ import { gelatoFromEnv, GelatoError } from "./gelato/client";
 import { priceItem, lowestUnitPriceMinor, lowestLineTotalMinor, PricingError } from "./pricing";
 import { generateOrderNumber } from "./order-number";
 import { fulfillOrder } from "./fulfillment";
-import { uploadDesignImage } from "./storage";
+import { uploadPreorderDesign, validateDesignDataUrl } from "./storage";
 import type { PrintProduct, PrintCategory, PrintAddon, PrintQtyVariant } from "@shared/schema";
 
 const ALLOWED_COUNTRIES_V1 = [
@@ -429,8 +429,8 @@ const CheckoutRequestSchema = z.object({
     sourceEventId: z.string().optional(),
     sourceTemplateKey: z.string().optional(),
     designChoice: z.enum(["user_design", "minimal_template"]).default("minimal_template"),
-    /** Kundens design som PNG data-URL. Lastes opp og brukes som print-fil. */
-    designImageDataUrl: z.string().optional(),
+    /** URL til ferdig opplastet design (fra /design-upload). Brukes som print-fil. */
+    designUrl: z.string().url().optional(),
   })).min(1),
   shipping: z.object({
     name: z.string(),
@@ -598,23 +598,18 @@ async function handleCheckout(req: Request, res: Response) {
     throw e;
   }
 
-  // Last opp kundens design-bilder som print-filer (etter commit — feil her
-  // skal ikke rulle tilbake ordren; fulfillment faller tilbake til QR-render).
+  // Knytt kundens ferdig-opplastede design (fra /design-upload) til hvert
+  // user_design-item som print-fil. Designet er allerede validert + lagret
+  // ved "Tilpass og bestill" — vi setter bare print_file_url her.
   for (const p of pricedItems) {
-    const dataUrl = p.source.designImageDataUrl;
-    if (!dataUrl || p.source.designChoice !== "user_design") continue;
+    const designUrl = p.source.designUrl;
+    if (!designUrl || p.source.designChoice !== "user_design") continue;
     const itemId = itemIds.get(p);
     if (!itemId) continue;
-    try {
-      const uploaded = await uploadDesignImage(orderId, itemId, dataUrl);
-      await pool.query(
-        `UPDATE print_order_items SET print_file_url=$1, print_file_generated_at=NOW() WHERE id=$2`,
-        [uploaded.url, itemId],
-      );
-    } catch (err) {
-      console.error(`[checkout] design-upload feilet for item ${itemId}:`, (err as Error).message);
-      // Ikke fatal — fulfillment renderer QR-fallback hvis print_file_url mangler
-    }
+    await pool.query(
+      `UPDATE print_order_items SET print_file_url=$1, print_file_generated_at=NOW() WHERE id=$2`,
+      [designUrl, itemId],
+    );
   }
 
   // Stripe Checkout Session.
@@ -681,6 +676,45 @@ async function handleCheckout(req: Request, res: Response) {
     totalMinor,
     currency: "nok",
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// POST /design-upload — last opp print-fil ved "Tilpass og bestill"
+// ─────────────────────────────────────────────────────────────────────────
+
+const DesignUploadSchema = z.object({
+  dataUrl: z.string(),
+  format: z.enum(["portrait", "square", "card"]),
+  eventId: z.string().optional(),
+});
+
+async function handleDesignUpload(req: Request, res: Response) {
+  const parsed = DesignUploadSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "INVALID_REQUEST" });
+  }
+  const { dataUrl } = parsed.data;
+
+  // Valider FØR opplasting — tomme/ugyldige filer avvises her
+  const v = validateDesignDataUrl(dataUrl);
+  if (!v.ok) {
+    return res.status(400).json({ error: "INVALID_DESIGN", message: v.reason });
+  }
+
+  const designToken = randomUUID();
+  try {
+    const uploaded = await uploadPreorderDesign(designToken, dataUrl);
+    return res.json({
+      designToken,
+      designUrl: uploaded.url,
+      bytes: v.widthBytes,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      error: "UPLOAD_FAILED",
+      message: (err as Error).message,
+    });
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -846,6 +880,10 @@ export function registerPrintRoutes(app: Express) {
 
   app.post("/api/print/quote", async (req, res, next) => {
     try { await handleQuote(req, res); } catch (e) { next(e); }
+  });
+
+  app.post("/api/print/design-upload", async (req, res, next) => {
+    try { await handleDesignUpload(req, res); } catch (e) { next(e); }
   });
 
   app.post("/api/print/checkout", async (req, res, next) => {

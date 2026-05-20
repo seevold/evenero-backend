@@ -12,7 +12,7 @@
 import { pool } from "../db";
 import { gelatoFromEnv, GelatoError } from "./gelato/client";
 import { renderToPdf } from "./pdf";
-import { uploadPrintPdf } from "./storage";
+import { uploadPrintPdf, verifyDesignUrlReachable } from "./storage";
 import type { GelatoOrderItem } from "./gelato/types";
 
 export interface FulfillResult {
@@ -122,6 +122,16 @@ export async function fulfillOrder(orderId: string): Promise<FulfillResult> {
            SET print_file_url=$1, print_file_generated_at=NOW()
            WHERE id=$2`,
           [pdfUrl, it.id],
+        );
+      }
+      // Pre-Gelato-vakt: verifiser at print-fila faktisk er hentbar + et
+      // gyldig bilde FØR vi sender til trykk. Hindrer at en død URL eller
+      // tom fil ender opp som en trykket tom plakat.
+      const reachable = await verifyDesignUrlReachable(pdfUrl);
+      if (!reachable) {
+        throw new GelatoError(
+          `Print-fil for item ${it.id} er ikke hentbar/gyldig (${pdfUrl.slice(0, 80)})`,
+          422,  // behandles som permanent feil → ordren markeres failed
         );
       }
       gelatoItems.push({
