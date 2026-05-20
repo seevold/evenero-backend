@@ -124,18 +124,21 @@ const CARD_ADDONS: ProductAddonDef[] = [
     },
     uidReplace: { from: "350-gsm-130lb-coated-silk", to: "350-gsm-130lb-uncoated" },
     surchargeMode: "per_unit",
+    // Gelato har ikke avrundede hjørner på ubelagt papir — gjensidig utelukkende
+    conflictsWith: ["rounded_corners"],
   },
   {
     slug: "rounded_corners",
     label: { no: "Avrundede hjørner", en: "Rounded corners", sv: "Rundade hörn", es: "Esquinas redondeadas" },
     description: {
-      no: "8 mm avrunding på alle fire hjørner",
-      en: "8 mm rounding on all four corners",
-      sv: "8 mm rundning på alla fyra hörn",
-      es: "Redondeo de 8 mm en las cuatro esquinas",
+      no: "8 mm avrunding på alle fire hjørner (kun på silke-papir)",
+      en: "8 mm rounding on all four corners (silk paper only)",
+      sv: "8 mm rundning på alla fyra hörn (endast silkepapper)",
+      es: "Redondeo de 8 mm en las cuatro esquinas (solo papel satinado)",
     },
     uidReplace: { from: "set_none", to: "set_round-8mm" },
     surchargeMode: "per_unit",
+    conflictsWith: ["paper_matt"],
   },
 ];
 
