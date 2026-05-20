@@ -109,6 +109,7 @@ interface CatalogResponseProduct {
     label: Record<string, string>;
     description: Record<string, string>;
     surchargeMinor: number;
+    surchargeMode: "flat" | "per_unit";
     conflictsWith?: string[];
   }>;
   expressSurchargeMinor: number;
@@ -150,6 +151,7 @@ function buildCatalogResponse(catalog: CatalogCache, country?: string) {
           label: a.label,
           description: a.description,
           surchargeMinor: a.surcharge_minor,
+          surchargeMode: a.surcharge_mode || "flat",
           conflictsWith: a.conflictsWith,
         })),
         expressSurchargeMinor: p.expressSurchargeMinor,

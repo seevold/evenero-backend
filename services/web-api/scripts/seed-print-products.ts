@@ -169,6 +169,64 @@ async function computeVariants(product: ProductDef): Promise<ComputedVariant[]> 
   return out;
 }
 
+// ─── Addon-surcharge-beregning ────────────────────────────────────────────
+
+interface ComputedAddon {
+  slug: string;
+  label: Record<string, string>;
+  description: Record<string, string>;
+  surcharge_minor: number;        // per_unit: per pakke/stk · flat: fast
+  surcharge_mode: "flat" | "per_unit";
+  uid_replace?: { from: string; to: string };
+  gelato_uid_override?: string;
+  conflictsWith?: string[];
+}
+
+/** Bygg modifisert UID fra addon-def. */
+function applyAddonToUid(baseUid: string, addon: ProductDef["addons"] extends (infer A)[] ? A : never): string {
+  if (addon.gelatoUidOverride) return addon.gelatoUidOverride;
+  if (addon.uidReplace) return baseUid.replace(addon.uidReplace.from, addon.uidReplace.to);
+  return baseUid;
+}
+
+async function computeAddons(product: ProductDef): Promise<ComputedAddon[]> {
+  if (!product.addons?.length) return [];
+  const out: ComputedAddon[] = [];
+  for (const addon of product.addons) {
+    let surchargeMinor: number;
+    if (addon.surchargeMode === "flat") {
+      surchargeMinor = addon.flatSurchargeMinor ?? 0;
+    } else {
+      // per_unit: quote base vs modifisert UID, diff × markup = retail-tillegg per enhet
+      const modifiedUid = applyAddonToUid(product.defaultGelatoUid, addon);
+      const baseCost = await quoteLanded(product.defaultGelatoUid, 1, ANCHOR_COUNTRY, ANCHOR_CURRENCY);
+      const addonCost = await quoteLanded(modifiedUid, 1, ANCHOR_COUNTRY, ANCHOR_CURRENCY);
+      if (!baseCost || !addonCost) {
+        console.log(`    ⚠ addon '${addon.slug}': kunne ikke quote — hopper over`);
+        continue;
+      }
+      const wholesaleDiff = Math.max(0, addonCost.productPrice - baseCost.productPrice);
+      // Marker opp diffen med samme margin-mål
+      const retailDiff = wholesaleDiff / (1 - product.markupTargetPct / 100);
+      surchargeMinor = Math.round(retailDiff * 100);
+      if (VERBOSE) {
+        console.log(`    addon '${addon.slug}': wholesale +${wholesaleDiff.toFixed(2)} → retail +${(surchargeMinor/100).toFixed(0)} kr/enhet`);
+      }
+    }
+    out.push({
+      slug: addon.slug,
+      label: addon.label,
+      description: addon.description,
+      surcharge_minor: surchargeMinor,
+      surcharge_mode: addon.surchargeMode,
+      uid_replace: addon.uidReplace,
+      gelato_uid_override: addon.gelatoUidOverride,
+      conflictsWith: addon.conflictsWith,
+    });
+  }
+  return out;
+}
+
 // ─── Upsert ──────────────────────────────────────────────────────────────
 
 async function upsertCategories(): Promise<void> {
@@ -193,22 +251,21 @@ async function upsertCategories(): Promise<void> {
   }
 }
 
-async function upsertProduct(product: ProductDef, variants: ComputedVariant[]): Promise<void> {
+async function upsertProduct(
+  product: ProductDef,
+  variants: ComputedVariant[],
+  addonsForDb: ComputedAddon[],
+): Promise<void> {
   if (!APPLY) {
-    console.log(`  [dry] produkt ${product.slug}: ${variants.length} varianter`);
+    console.log(`  [dry] produkt ${product.slug}: ${variants.length} varianter, ${addonsForDb.length} addons`);
     for (const v of variants) {
       console.log(`         qty=${v.qty} retail=${(v.retail_minor/100).toFixed(0)} margin=${v.margin_pct}%`);
     }
+    for (const a of addonsForDb) {
+      console.log(`         addon ${a.slug}: +${(a.surcharge_minor/100).toFixed(0)} kr (${a.surcharge_mode})`);
+    }
     return;
   }
-  const addonsForDb = (product.addons || []).map((a) => ({
-    slug: a.slug,
-    label: a.label,
-    description: a.description,
-    surcharge_minor: a.surchargeMinor,
-    gelato_uid_override: a.gelatoUidOverride,
-    conflictsWith: a.conflictsWith,           // BUG: manglet før — frontend kunne ikke disable konflikter
-  }));
   await pool.query(
     `INSERT INTO print_products
       (slug, category_slug, product_type, display_name, width_mm, height_mm,
@@ -287,7 +344,8 @@ async function main() {
       console.log(`  ✗ Hopper over (ingen gyldige varianter)`);
       continue;
     }
-    await upsertProduct(product, variants);
+    const addons = await computeAddons(product);
+    await upsertProduct(product, variants, addons);
     totalProducts++;
     totalVariants += variants.length;
   }

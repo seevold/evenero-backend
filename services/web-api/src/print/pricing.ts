@@ -64,29 +64,33 @@ function resolveVariant(qty: number, variants: PrintQtyVariant[]): PrintQtyVaria
 }
 
 /**
- * Validér addon-valg + finn SKU-override og samlet tillegg.
- * Hvis to addons har conflictsWith som inkluderer hverandre → kast feil.
+ * Validér addon-valg + komponér Gelato-UID + beregn samlet tillegg.
+ *
+ * UID-bygging:
+ *  - gelato_uid_override: bytter HELE UID-en (maks én — sjekket via conflict)
+ *  - uid_replace: komponerbar string-replace (flere kan stables)
+ * Surcharge:
+ *  - flat: surcharge_minor brukes som-er
+ *  - per_unit: surcharge_minor × qty
  */
 function applyAddons(
   product: PrintProduct,
   addonSlugs: string[],
-): { gelatoUidOverride?: string; totalSurchargeMinor: number; applied: PricedItem["addonsApplied"] } {
+  qty: number,
+  baseUid: string,
+): { resolvedUid: string; totalSurchargeMinor: number; applied: PricedItem["addonsApplied"] } {
   const addons = ((product.addons as PrintAddon[]) || []);
   const chosen = addons.filter((a) => addonSlugs.includes(a.slug));
 
   if (chosen.length !== addonSlugs.length) {
     const unknown = addonSlugs.filter((s) => !addons.some((a) => a.slug === s));
-    throw new PricingError(
-      `Ukjente addons: ${unknown.join(", ")}`,
-      "UNKNOWN_ADDON",
-    );
+    throw new PricingError(`Ukjente addons: ${unknown.join(", ")}`, "UNKNOWN_ADDON");
   }
 
-  // Sjekk conflicts
+  // Conflict-sjekk
   for (const a of chosen) {
-    const conflicts = (a as PrintAddon).conflictsWith || [];
     for (const other of chosen) {
-      if (other.slug !== a.slug && conflicts.includes(other.slug)) {
+      if (other.slug !== a.slug && (a.conflictsWith || []).includes(other.slug)) {
         throw new PricingError(
           `Addons '${a.slug}' og '${other.slug}' kan ikke kombineres`,
           "ADDON_CONFLICT",
@@ -95,24 +99,40 @@ function applyAddons(
     }
   }
 
-  // Maks én SKU-override (sjekkes via conflict ovenfor)
-  const uidOverrides = chosen.filter((a) => a.gelato_uid_override).map((a) => a.gelato_uid_override!);
-  if (uidOverrides.length > 1) {
-    throw new PricingError(
-      "Flere addons prøver å overstyre SKU samtidig",
-      "ADDON_CONFLICT",
-    );
+  // UID-komposisjon
+  const overrides = chosen.filter((a) => a.gelato_uid_override);
+  if (overrides.length > 1) {
+    throw new PricingError("Flere addons overstyrer SKU samtidig", "ADDON_CONFLICT");
+  }
+  let resolvedUid = overrides[0]?.gelato_uid_override || baseUid;
+  for (const a of chosen) {
+    if (a.uid_replace) {
+      if (!resolvedUid.includes(a.uid_replace.from)) {
+        throw new PricingError(
+          `Addon '${a.slug}': UID-del '${a.uid_replace.from}' finnes ikke i ${resolvedUid}`,
+          "ADDON_UID_MISMATCH",
+        );
+      }
+      resolvedUid = resolvedUid.replace(a.uid_replace.from, a.uid_replace.to);
+    }
   }
 
-  return {
-    gelatoUidOverride: uidOverrides[0],
-    totalSurchargeMinor: chosen.reduce((s, a) => s + a.surcharge_minor, 0),
-    applied: chosen.map((a) => ({
+  // Surcharge
+  let totalSurchargeMinor = 0;
+  const applied: PricedItem["addonsApplied"] = [];
+  for (const a of chosen) {
+    const sc = a.surcharge_mode === "per_unit"
+      ? a.surcharge_minor * qty
+      : a.surcharge_minor;
+    totalSurchargeMinor += sc;
+    applied.push({
       slug: a.slug,
       label: a.label.no || a.label.en || a.slug,
-      surchargeMinor: a.surcharge_minor,
-    })),
-  };
+      surchargeMinor: sc,
+    });
+  }
+
+  return { resolvedUid, totalSurchargeMinor, applied };
 }
 
 export function priceItem(query: PriceQueryItem, locale: string = "no"): PricedItem {
@@ -122,26 +142,19 @@ export function priceItem(query: PriceQueryItem, locale: string = "no"): PricedI
   }
 
   const variant = resolveVariant(query.qty, variants);
-  const addonResult = applyAddons(query.product, query.addonSlugs || []);
+  const baseUid = variant.gelato_uid || query.product.defaultGelatoUid;
+  const addonResult = applyAddons(query.product, query.addonSlugs || [], variant.qty, baseUid);
 
-  const gelatoUid = addonResult.gelatoUidOverride
-    || variant.gelato_uid
-    || query.product.defaultGelatoUid;
-
-  const baseRetailMinor = variant.retail_minor;
-  const lineTotalMinor = baseRetailMinor + addonResult.totalSurchargeMinor;
+  const lineTotalMinor = variant.retail_minor + addonResult.totalSurchargeMinor;
   const unitPriceMinor = Math.round(lineTotalMinor / variant.qty);
 
   return {
     productSlug: query.product.slug,
-    gelatoUid,
-    qty: variant.qty,                // korrigert hvis bruker spurte om feil tier
+    gelatoUid: addonResult.resolvedUid,
+    qty: variant.qty,
     unitPriceMinor,
     lineTotalMinor,
-    addonsApplied: addonResult.applied.map((a) => ({
-      ...a,
-      label: addonResult.applied.find((x) => x.slug === a.slug)?.label || a.slug,
-    })),
+    addonsApplied: addonResult.applied,
     variantQty: variant.qty,
     recommended: variant.recommended || false,
     upgradeLabel: variant.upgrade_label,
@@ -149,13 +162,18 @@ export function priceItem(query: PriceQueryItem, locale: string = "no"): PricedI
 }
 
 /**
- * Returnerer den laveste enheten i produkt-katalogen — brukes for "fra X kr"-
- * visningen i kategori-tabs.
+ * Returnerer den laveste pris-per-fysiske-enhet i produkt-katalogen — brukes
+ * for "fra X kr/stk"-visningen i kategori-tabs.
+ *
+ * VIKTIG: deler på (qty × packSize). For postkort med packSize=10 betyr
+ * qty=10 → 100 fysiske kort. Uten packSize-multiplikasjon ville "fra"-prisen
+ * bli 10× for høy (postkort viste 90 kr/stk istedenfor 9 kr/stk).
  */
 export function lowestUnitPriceMinor(product: PrintProduct): number {
   const variants = product.qtyVariants as unknown as PrintQtyVariant[];
   if (!variants?.length) return 0;
-  return Math.min(...variants.map((v) => Math.round(v.retail_minor / v.qty)));
+  const packSize = (product as unknown as { packSize?: number }).packSize || 1;
+  return Math.min(...variants.map((v) => Math.round(v.retail_minor / (v.qty * packSize))));
 }
 
 /**

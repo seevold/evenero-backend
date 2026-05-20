@@ -230,12 +230,14 @@ export type PrintQtyVariant = {
 };
 
 export type PrintAddon = {
-  slug: string;                            // 'premium_paper'
-  label: Record<string, string>;           // {no:'Premium dobbelsidig matt', en:'...'}
-  description: Record<string, string>;     // forklaring for tooltip / detalj
-  surcharge_minor: number;                 // NOK-øre, retail-tillegg (kan være negativ)
-  gelato_uid_override?: string;            // hvis valgt: bytt SKU
-  conflictsWith?: string[];                // slugs til addons som ikke kan velges sammen
+  slug: string;                            // 'premium_paper', 'paper_matt', ...
+  label: Record<string, string>;
+  description: Record<string, string>;
+  surcharge_minor: number;                 // NOK-øre. flat: fast · per_unit: per pakke/stk
+  surcharge_mode: "flat" | "per_unit";     // hvordan surcharge_minor brukes
+  uid_replace?: { from: string; to: string }; // komponerbar UID-modifikasjon
+  gelato_uid_override?: string;            // hvis valgt: bytt hele SKU
+  conflictsWith?: string[];                // slugs som ikke kan velges sammen
 };
 
 // ─────────────────────────────────────────────────────────────────────────
