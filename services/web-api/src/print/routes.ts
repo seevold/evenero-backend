@@ -380,11 +380,20 @@ async function handleQuote(req: Request, res: Response) {
   return res.json({
     items: pricedItems,
     subtotalMinor,
+    bundleDiscountMinor: bundleDiscountMinor(pricedItems.length),
     currency: "nok",                          // Stripe Adaptive Pricing håndterer FX
     shippingOptions,
     estimatedDelivery: estDelivery,
     needsBundleSuggestion,
   });
+}
+
+/**
+ * Pakkerabatt: når kunden bestiller 2+ produkter sendes alt i én forsendelse
+ * — vi sparer frakt og gir besparelsen tilbake. Flat 50 kr ved 2+ produkter.
+ */
+function bundleDiscountMinor(itemCount: number): number {
+  return itemCount >= 2 ? 5000 : 0;
 }
 
 function cheapest<T extends { price: number }>(arr: T[]): T {
@@ -533,7 +542,8 @@ async function handleCheckout(req: Request, res: Response) {
     throw err;
   }
 
-  const totalMinor = subtotalMinor + shippingMinor;
+  const discountMinor = bundleDiscountMinor(pricedItems.length);
+  const totalMinor = subtotalMinor + shippingMinor - discountMinor;
 
   // Opprett print_order-rad. Vi setter gelato_order_reference_id allerede
   // her som idempotency-nøkkel — webhook-trigget fulfillment bruker den.
@@ -630,6 +640,18 @@ async function handleCheckout(req: Request, res: Response) {
         product_data: { name: "Express-levering" },
       },
     });
+  }
+  // Pakkerabatt: Stripe line_items kan ikke være negative, så vi trekker
+  // rabatten fra den dyreste linjen (alltid > 50 kr, holder seg positiv).
+  if (discountMinor > 0 && lineItems.length > 0) {
+    let maxIdx = 0;
+    for (let i = 1; i < lineItems.length; i++) {
+      const cur = lineItems[i].price_data!.unit_amount || 0;
+      if (cur > (lineItems[maxIdx].price_data!.unit_amount || 0)) maxIdx = i;
+    }
+    const pd = lineItems[maxIdx].price_data!;
+    pd.unit_amount = Math.max(100, (pd.unit_amount || 0) - discountMinor);
+    pd.product_data!.name += " (inkl. pakkerabatt)";
   }
 
   const stripe = getStripe();
