@@ -15,6 +15,7 @@ import { gelatoFromEnv, GelatoError } from "./gelato/client";
 import { priceItem, lowestUnitPriceMinor, lowestLineTotalMinor, PricingError } from "./pricing";
 import { generateOrderNumber } from "./order-number";
 import { fulfillOrder } from "./fulfillment";
+import { uploadDesignImage } from "./storage";
 import type { PrintProduct, PrintCategory, PrintAddon, PrintQtyVariant } from "@shared/schema";
 
 const ALLOWED_COUNTRIES_V1 = [
@@ -419,6 +420,8 @@ const CheckoutRequestSchema = z.object({
     sourceEventId: z.string().optional(),
     sourceTemplateKey: z.string().optional(),
     designChoice: z.enum(["user_design", "minimal_template"]).default("minimal_template"),
+    /** Kundens design som PNG data-URL. Lastes opp og brukes som print-fil. */
+    designImageDataUrl: z.string().optional(),
   })).min(1),
   shipping: z.object({
     name: z.string(),
@@ -537,6 +540,8 @@ async function handleCheckout(req: Request, res: Response) {
   const orderNumber = await generateOrderNumber();
   const orderId = randomUUID();
   const gelatoRef = `evenero-${orderNumber}`;
+  // Map pricedItem → generert item-ID, brukt for design-upload etter commit
+  const itemIds = new Map<typeof pricedItems[number], string>();
 
   await pool.query("BEGIN");
   try {
@@ -561,15 +566,17 @@ async function handleCheckout(req: Request, res: Response) {
       ],
     );
     for (const p of pricedItems) {
+      const itemId = randomUUID();
+      itemIds.set(p, itemId);
       await pool.query(
         `INSERT INTO print_order_items
           (id, order_id, product_slug, gelato_product_uid, gelato_item_reference_id,
            quantity, unit_price_minor, line_total_minor,
            source_event_id, source_template_key, design_choice)
-         VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [
-          orderId, p.priced.productSlug, p.priced.gelatoUid,
-          `${p.priced.productSlug}-${randomUUID().slice(0, 8)}`,
+          itemId, orderId, p.priced.productSlug, p.priced.gelatoUid,
+          `${p.priced.productSlug}-${itemId.slice(0, 8)}`,
           p.priced.qty, p.priced.unitPriceMinor, p.priced.lineTotalMinor,
           p.source.sourceEventId, p.source.sourceTemplateKey, p.source.designChoice,
         ],
@@ -579,6 +586,25 @@ async function handleCheckout(req: Request, res: Response) {
   } catch (e) {
     await pool.query("ROLLBACK");
     throw e;
+  }
+
+  // Last opp kundens design-bilder som print-filer (etter commit — feil her
+  // skal ikke rulle tilbake ordren; fulfillment faller tilbake til QR-render).
+  for (const p of pricedItems) {
+    const dataUrl = p.source.designImageDataUrl;
+    if (!dataUrl || p.source.designChoice !== "user_design") continue;
+    const itemId = itemIds.get(p);
+    if (!itemId) continue;
+    try {
+      const uploaded = await uploadDesignImage(orderId, itemId, dataUrl);
+      await pool.query(
+        `UPDATE print_order_items SET print_file_url=$1, print_file_generated_at=NOW() WHERE id=$2`,
+        [uploaded.url, itemId],
+      );
+    } catch (err) {
+      console.error(`[checkout] design-upload feilet for item ${itemId}:`, (err as Error).message);
+      // Ikke fatal — fulfillment renderer QR-fallback hvis print_file_url mangler
+    }
   }
 
   // Stripe Checkout Session.

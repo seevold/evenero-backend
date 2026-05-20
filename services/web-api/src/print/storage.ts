@@ -53,6 +53,35 @@ export async function uploadPrintPdf(
   return { url, bucketPath };
 }
 
+/** Last opp kundens design-PNG (fra data-URL) som print-fil.
+ *  Brukes når kunden har et eget design — Gelato godtar PNG direkte. */
+export async function uploadDesignImage(
+  orderId: string,
+  itemId: string,
+  dataUrl: string,
+): Promise<UploadedPdf> {
+  // data-URL: "data:image/png;base64,XXXX"
+  const match = dataUrl.match(/^data:image\/(png|jpeg);base64,(.+)$/);
+  if (!match) throw new Error("Ugyldig design data-URL (forventet PNG/JPEG base64)");
+  const ext = match[1] === "jpeg" ? "jpg" : "png";
+  const buffer = Buffer.from(match[2], "base64");
+  if (buffer.length > 15 * 1024 * 1024) {
+    throw new Error("Design-bilde for stort (maks 15 MB)");
+  }
+  const bucketPath = `print/${orderId}/${itemId}-design.${ext}`;
+  const file = getStorage().bucket(BUCKET_NAME).file(bucketPath);
+  await file.save(buffer, {
+    contentType: `image/${match[1]}`,
+    resumable: false,
+    metadata: { cacheControl: "private, max-age=604800" },
+  });
+  const [url] = await file.getSignedUrl({
+    version: "v4", action: "read",
+    expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
+  });
+  return { url, bucketPath };
+}
+
 /** Sletter PDF-en (eks. ved refund eller cleanup). Stille-feilende. */
 export async function deletePrintPdf(bucketPath: string): Promise<void> {
   try {
