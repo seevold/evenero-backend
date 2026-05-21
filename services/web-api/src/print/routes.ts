@@ -659,6 +659,7 @@ async function handleCheckout(req: Request, res: Response) {
     pd.product_data!.name += " (inkl. pakkerabatt)";
   }
 
+  const cancelEventId = body.items.find((it) => it.sourceEventId)?.sourceEventId;
   const stripe = getStripe();
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
@@ -674,7 +675,10 @@ async function handleCheckout(req: Request, res: Response) {
       app_base_url: body.returnBaseUrl,
     },
     success_url: `${body.returnBaseUrl}/print/order/${orderNumber}?session={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${body.returnBaseUrl}/print/checkout?canceled=1`,
+    // Avbrutt checkout → tilbake til mal-/bestillingssiden for eventet.
+    cancel_url: cancelEventId
+      ? `${body.returnBaseUrl}/manage/${cancelEventId}/templates`
+      : `${body.returnBaseUrl}/`,
   });
 
   // Lagre stripe_session_id på ordren for senere lookup
