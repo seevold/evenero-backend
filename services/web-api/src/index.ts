@@ -29,6 +29,11 @@ app.use(
 // Stripe webhook needs raw body BEFORE JSON parsing
 app.use("/api/webhooks/stripe", express.raw({ type: "application/json" }));
 
+// Print-design-opplasting sender en capturet print-fil (JPEG data-URL,
+// typisk 2-6 MB). Default express.json()-grense er 100 KB → egen høyere
+// grense for kun dette endepunktet.
+app.use("/api/print/design-upload", express.json({ limit: "30mb" }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
