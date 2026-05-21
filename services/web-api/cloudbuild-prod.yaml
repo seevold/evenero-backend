@@ -33,6 +33,9 @@ steps:
       - --image=europe-north1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/web-api:${SHORT_SHA}
       - --region=europe-north1
       - --project=${PROJECT_ID}
+      # Hold én instans varm — web-api betjener checkout/pengeløypa, cold
+      # start her = treg betaling. Gjelder kun prod; staging står på min=0.
+      - --min-instances=1
       - --quiet
 
 options:
