@@ -230,11 +230,9 @@ interface QuoteShippingOption {
   isFallbackPickup?: boolean;  // true hvis ingen ekte hjemlevering finnes
 }
 
-// Frakt-policy: Evenero dekker frakt under terskelen; over den betaler
-// kunden den faktiske Gelato-fraktkosten selv. Holdes server-side så
-// kunden ikke kan manipulere den.
-const FREE_SHIPPING_THRESHOLD_MINOR = 10000;  // 100 kr
-
+// Frakt-policy: den billigste leveringsmåten er alltid gratis (Evenero
+// dekker den). Vi tilbyr maks to alternativer — billigste (inkludert) +
+// evt. én raskere oppgradering der kunden betaler pris-differansen.
 async function handleQuote(req: Request, res: Response) {
   const parsed = QuoteRequestSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -323,30 +321,41 @@ async function handleQuote(req: Request, res: Response) {
       }
       const sorted = [...byUid.values()].sort((a, b) => a.price - b.price);
 
-      // Hver metode er valgbar. Frakt under terskelen er gratis (Evenero
-      // dekker); over terskelen betaler kunden faktisk Gelato-fraktkost.
-      for (const m of sorted) {
-        const gelatoCostMinor = Math.max(0, Math.round(m.price * 100));
-        const cost = gelatoCostMinor < FREE_SHIPPING_THRESHOLD_MINOR ? 0 : gelatoCostMinor;
+      const toOption = (m: typeof methods[number], cost: number) => {
         const isPickup = m.type === "pick_up";
-        shippingOptions.push({
+        return {
           uid: m.shipmentMethodUid,
-          type: isPickup ? "pickup" : m.type,
+          type: (isPickup ? "pickup" : m.type) as "normal" | "express" | "pickup",
           cost,
-          gelatoCostMinor,
+          gelatoCostMinor: Math.max(0, Math.round(m.price * 100)),
           label: isPickup ? "Henting på utleveringssted"
                : m.type === "express" ? "Ekspress" : "Hjemlevering",
           estimatedDays: { min: m.minDeliveryDays, max: m.maxDeliveryDays },
           carrierName: m.name,
           isFree: cost === 0,
           isFallbackPickup: isPickup && !hasRealDelivery,
-        });
-      }
+        };
+      };
 
-      // Leveringsestimat fra den billigste metoden
-      const primary = sorted[0];
-      if (primary?.minDeliveryDate && primary?.maxDeliveryDate) {
-        estDelivery = { min: primary.minDeliveryDate, max: primary.maxDeliveryDate };
+      if (sorted.length) {
+        // Alternativ 1: billigste metode — alltid gratis (Evenero dekker den).
+        const cheapestM = sorted[0];
+        shippingOptions.push(toOption(cheapestM, 0));
+
+        // Alternativ 2 (valgfritt): den rimeligste metoden som er reelt
+        // raskere enn den billigste. Kunden betaler pris-differansen.
+        const upgrade = sorted
+          .slice(1)
+          .filter((m) => m.maxDeliveryDays < cheapestM.maxDeliveryDays)
+          .sort((a, b) => a.price - b.price)[0];
+        if (upgrade) {
+          const deltaMinor = Math.max(0, Math.round((upgrade.price - cheapestM.price) * 100));
+          shippingOptions.push(toOption(upgrade, deltaMinor));
+        }
+
+        if (cheapestM.minDeliveryDate && cheapestM.maxDeliveryDate) {
+          estDelivery = { min: cheapestM.minDeliveryDate, max: cheapestM.maxDeliveryDate };
+        }
       }
 
       // Kun pickup tilgjengelig (typisk plakat alene til NO) → hint
@@ -522,12 +531,15 @@ async function handleCheckout(req: Request, res: Response) {
     }
     // Velg metoden kunden valgte; faller tilbake til billigste hvis uid
     // mangler eller ikke finnes i dette (re-quotede) settet.
+    const cheapestM = cheapest(methods);
     const chosen = (body.shipmentMethodUid
       && methods.find((m) => m.shipmentMethodUid === body.shipmentMethodUid))
-      || cheapest(methods);
-    // Samme frakt-policy som /quote — re-validert server-side.
-    const gelatoCostMinor = Math.max(0, Math.round(chosen.price * 100));
-    shippingMinor = gelatoCostMinor < FREE_SHIPPING_THRESHOLD_MINOR ? 0 : gelatoCostMinor;
+      || cheapestM;
+    // Frakt-policy (re-validert server-side): den billigste metoden er
+    // gratis; en raskere oppgradering koster pris-differansen.
+    shippingMinor = chosen.shipmentMethodUid === cheapestM.shipmentMethodUid
+      ? 0
+      : Math.max(0, Math.round((chosen.price - cheapestM.price) * 100));
     shippingMethodUid = chosen.shipmentMethodUid;
     shippingMethodName = chosen.name;
   } catch (err) {
