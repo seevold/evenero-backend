@@ -742,9 +742,12 @@ async function handleGetOrder(req: Request, res: Response) {
   );
   if (!order.rows[0]) return res.status(404).json({ error: "NOT_FOUND" });
   const items = await pool.query(
-    `SELECT product_slug, quantity, unit_price_minor, line_total_minor
-     FROM print_order_items WHERE order_id=$1
-     ORDER BY created_at`,
+    `SELECT oi.product_slug, oi.quantity, oi.unit_price_minor, oi.line_total_minor,
+            p.display_name AS "displayName"
+     FROM print_order_items oi
+     LEFT JOIN print_products p ON p.slug = oi.product_slug
+     WHERE oi.order_id=$1
+     ORDER BY oi.created_at`,
     [order.rows[0].id],
   );
   return res.json({ ...order.rows[0], items: items.rows });
