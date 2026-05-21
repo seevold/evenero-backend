@@ -212,6 +212,10 @@ const QuoteRequestSchema = z.object({
     qty: z.number().int().positive(),
     addonSlugs: z.array(z.string()).optional(),
   })).min(1),
+  // Valgfri: faktisk leveringsadresse → presis frakt-/leverings-quote.
+  // Uten disse brukes en placeholder-mottaker i landets hovedstad.
+  postalCode: z.string().min(1).max(20).optional(),
+  city: z.string().min(1).max(120).optional(),
 });
 
 interface QuoteShippingOption {
@@ -228,7 +232,7 @@ async function handleQuote(req: Request, res: Response) {
   if (!parsed.success) {
     return res.status(400).json({ error: "INVALID_REQUEST", details: parsed.error.format() });
   }
-  const { country, items } = parsed.data;
+  const { country, items, postalCode, city } = parsed.data;
 
   if (!ALLOWED_COUNTRIES_V1.includes(country)) {
     return res.status(400).json({ error: "COUNTRY_NOT_SUPPORTED", country });
@@ -282,15 +286,17 @@ async function handleQuote(req: Request, res: Response) {
 
   try {
     const gelato = gelatoFromEnv();
-    // Bruk en placeholder-mottaker i hovedstad for landet — vi kun bryr oss
-    // om shipping-priser/-leveringsdatoer, ikke faktisk levering enda.
+    // Hvis kunden har fylt inn adresse, quote mot DEN — ellers placeholder
+    // i landets hovedstad. Frakt/leveringsdager kan variere per postnummer.
     const quote = await gelato.quoteOrder({
       orderReferenceId: `quote-${Date.now()}`,
       currency: "NOK",
       recipient: {
         firstName: "Quote", lastName: "Estimat",
-        addressLine1: "Test 1", city: cityForCountry(country),
-        postCode: postCodeForCountry(country), country,
+        addressLine1: "Test 1",
+        city: city || cityForCountry(country),
+        postCode: postalCode || postCodeForCountry(country),
+        country,
         email: "quote@evenero.no",
       },
       products: gelatoProducts,
