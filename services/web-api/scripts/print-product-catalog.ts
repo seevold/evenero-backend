@@ -83,7 +83,7 @@ export const CATEGORIES: CategoryDef[] = [
     slug: "postcard",
     formatFamily: "2x3",
     presentationMode: "quantity",
-    displayName: { no: "Postkort", en: "Postcards", sv: "Vykort", es: "Postales" },
+    displayName: { no: "Flyer", en: "Flyers", sv: "Flygblad", es: "Folletos" },
     displayOrder: 10,
   },
   {
@@ -162,7 +162,7 @@ export const PRODUCTS: ProductDef[] = [
   {
     slug: "postcard_a6",
     categorySlug: "postcard",
-    displayName: { no: "Postkort A6", en: "A6 postcards", sv: "A6-vykort", es: "Postales A6" },
+    displayName: { no: "Flyer A6", en: "A6 flyer", sv: "A6-flygblad", es: "Folleto A6" },
     widthMm: 105, heightMm: 148,
     defaultGelatoUid: "pack_of_cards_qt_10_pcs_pf_a6_upt_350-gsm-130lb-coated-silk_cl_4-4_ct_none_prt_none_sft_none_set_none_ver",
     packSize: 10,
@@ -184,7 +184,7 @@ export const PRODUCTS: ProductDef[] = [
   {
     slug: "postcard_a5",
     categorySlug: "postcard",
-    displayName: { no: "Postkort A5", en: "A5 postcards", sv: "A5-vykort", es: "Postales A5" },
+    displayName: { no: "Flyer A5", en: "A5 flyer", sv: "A5-flygblad", es: "Folleto A5" },
     widthMm: 148, heightMm: 210,
     defaultGelatoUid: "pack_of_cards_qt_10_pcs_pf_a5_upt_350-gsm-130lb-coated-silk_cl_4-4_ct_none_prt_none_sft_none_set_none_ver",
     packSize: 10,
