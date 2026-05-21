@@ -219,13 +219,21 @@ const QuoteRequestSchema = z.object({
 });
 
 interface QuoteShippingOption {
-  type: "normal" | "express";
-  cost: number;                // i NOK-øre over basis (0 = inkludert)
+  uid: string;                 // shipmentMethodUid — unik id kunden velger
+  type: "normal" | "express" | "pickup";
+  cost: number;                // kundens kostnad i øre (0 = inkludert/gratis)
+  gelatoCostMinor: number;     // faktisk Gelato-fraktkost (transparens)
   label: string;
   estimatedDays: { min: number; max: number };
   carrierName: string;
-  isFallbackPickup?: boolean;  // true hvis vi måtte falle tilbake på pickup
+  isFree: boolean;             // cost === 0 (Evenero dekker frakten)
+  isFallbackPickup?: boolean;  // true hvis ingen ekte hjemlevering finnes
 }
+
+// Frakt-policy: Evenero dekker frakt under terskelen; over den betaler
+// kunden den faktiske Gelato-fraktkosten selv. Holdes server-side så
+// kunden ikke kan manipulere den.
+const FREE_SHIPPING_THRESHOLD_MINOR = 10000;  // 100 kr
 
 async function handleQuote(req: Request, res: Response) {
   const parsed = QuoteRequestSchema.safeParse(req.body);
@@ -304,63 +312,49 @@ async function handleQuote(req: Request, res: Response) {
 
     const q = quote.quotes[0];
     if (q) {
-      const normals = q.shipmentMethods.filter((m) => m.type === "normal");
-      const expresses = q.shipmentMethods.filter((m) => m.type === "express");
-      const pickups = q.shipmentMethods.filter((m) => m.type === "pick_up");
+      const methods = q.shipmentMethods;
+      const hasRealDelivery = methods.some((m) => m.type === "normal" || m.type === "express");
 
-      if (normals.length || expresses.length) {
-        // Vanlig flyt — minst én delivery-metode finnes
-        const normal = normals.length ? cheapest(normals) : null;
-        const express = expresses.length ? cheapest(expresses) : null;
+      // Dedup på shipmentMethodUid (behold billigste ved duplikat)
+      const byUid = new Map<string, typeof methods[number]>();
+      for (const m of methods) {
+        const prev = byUid.get(m.shipmentMethodUid);
+        if (!prev || m.price < prev.price) byUid.set(m.shipmentMethodUid, m);
+      }
+      const sorted = [...byUid.values()].sort((a, b) => a.price - b.price);
 
-        if (normal) {
-          shippingOptions.push({
-            type: "normal",
-            cost: 0,                           // basis = gratis
-            label: "Hjemlevering",
-            estimatedDays: { min: normal.minDeliveryDays, max: normal.maxDeliveryDays },
-            carrierName: normal.name,
-          });
-          if (normal.minDeliveryDate && normal.maxDeliveryDate) {
-            estDelivery = { min: normal.minDeliveryDate, max: normal.maxDeliveryDate };
-          }
-        }
-        if (express) {
-          const surcharge = normal
-            ? Math.max(0, Math.round((express.price - normal.price) * 100))
-            : 5000;
-          shippingOptions.push({
-            type: "express",
-            cost: surcharge,
-            label: "Express",
-            estimatedDays: { min: express.minDeliveryDays, max: express.maxDeliveryDays },
-            carrierName: express.name,
-          });
-          if (!estDelivery && express.minDeliveryDate && express.maxDeliveryDate) {
-            estDelivery = { min: express.minDeliveryDate, max: express.maxDeliveryDate };
-          }
-        }
-      } else if (pickups.length) {
-        // Kun pickup tilgjengelig (typisk: poster alene til NO)
-        // Vi tilbyr pickup som "Hjemlevering"-substitutt og flagger
-        // bundle-suggestion til frontend.
-        const pickup = cheapest(pickups);
+      // Hver metode er valgbar. Frakt under terskelen er gratis (Evenero
+      // dekker); over terskelen betaler kunden faktisk Gelato-fraktkost.
+      for (const m of sorted) {
+        const gelatoCostMinor = Math.max(0, Math.round(m.price * 100));
+        const cost = gelatoCostMinor < FREE_SHIPPING_THRESHOLD_MINOR ? 0 : gelatoCostMinor;
+        const isPickup = m.type === "pick_up";
         shippingOptions.push({
-          type: "normal",                      // marker som "standard"
-          cost: 0,
-          label: "Henting på utleveringssted",
-          estimatedDays: { min: pickup.minDeliveryDays, max: pickup.maxDeliveryDays },
-          carrierName: pickup.name,
-          isFallbackPickup: true,
+          uid: m.shipmentMethodUid,
+          type: isPickup ? "pickup" : m.type,
+          cost,
+          gelatoCostMinor,
+          label: isPickup ? "Henting på utleveringssted"
+               : m.type === "express" ? "Ekspress" : "Hjemlevering",
+          estimatedDays: { min: m.minDeliveryDays, max: m.maxDeliveryDays },
+          carrierName: m.name,
+          isFree: cost === 0,
+          isFallbackPickup: isPickup && !hasRealDelivery,
         });
-        if (pickup.minDeliveryDate && pickup.maxDeliveryDate) {
-          estDelivery = { min: pickup.minDeliveryDate, max: pickup.maxDeliveryDate };
-        }
-        // Hint til frontend: hvis kurven bare har plakat, foreslå å legge til
-        // et kort-produkt for å få ekte hjemlevering.
+      }
+
+      // Leveringsestimat fra den billigste metoden
+      const primary = sorted[0];
+      if (primary?.minDeliveryDate && primary?.maxDeliveryDate) {
+        estDelivery = { min: primary.minDeliveryDate, max: primary.maxDeliveryDate };
+      }
+
+      // Kun pickup tilgjengelig (typisk plakat alene til NO) → hint
+      // frontend om å legge til et kort-produkt for ekte hjemlevering.
+      if (!hasRealDelivery && methods.some((m) => m.type === "pick_up")) {
         const onlyPosters = items.every((it) => {
           const p = productMap.get(it.productSlug);
-          return p?.categorySlug.startsWith("poster_");
+          return p?.categorySlug === "poster";
         });
         if (onlyPosters) needsBundleSuggestion = true;
       }
@@ -447,7 +441,8 @@ const CheckoutRequestSchema = z.object({
     country: z.string().length(2),
     phone: z.string().optional(),
   }),
-  shippingMethodType: z.enum(["normal", "express"]).default("normal"),
+  /** Valgt frakt-metode (shipmentMethodUid fra /quote). Utelatt → billigste. */
+  shipmentMethodUid: z.string().optional(),
   /** Returnerer-URL etter Stripe checkout — frontend setter denne basert
    *  på sin egen routing. */
   returnBaseUrl: z.string().url(),
@@ -520,25 +515,18 @@ async function handleCheckout(req: Request, res: Response) {
     if (!q) {
       return res.status(400).json({ error: "NO_SHIPPING_AVAILABLE" });
     }
-    const normals = q.shipmentMethods.filter((m) => m.type === "normal");
-    const expresses = q.shipmentMethods.filter((m) => m.type === "express");
-    const pickups = q.shipmentMethods.filter((m) => m.type === "pick_up");
-    let chosen;
-    if (body.shippingMethodType === "express" && expresses.length) {
-      chosen = cheapest(expresses);
-      shippingMinor = Math.round(chosen.price * 100);  // ekstra-kost over basis
-    } else if (normals.length) {
-      chosen = cheapest(normals);
-      shippingMinor = 0;  // hjemlevering inkludert
-    } else if (expresses.length) {
-      chosen = cheapest(expresses);
-      shippingMinor = 0;
-    } else if (pickups.length) {
-      chosen = cheapest(pickups);
-      shippingMinor = 0;
-    } else {
+    const methods = q.shipmentMethods;
+    if (!methods.length) {
       return res.status(400).json({ error: "NO_SHIPPING_AVAILABLE" });
     }
+    // Velg metoden kunden valgte; faller tilbake til billigste hvis uid
+    // mangler eller ikke finnes i dette (re-quotede) settet.
+    const chosen = (body.shipmentMethodUid
+      && methods.find((m) => m.shipmentMethodUid === body.shipmentMethodUid))
+      || cheapest(methods);
+    // Samme frakt-policy som /quote — re-validert server-side.
+    const gelatoCostMinor = Math.max(0, Math.round(chosen.price * 100));
+    shippingMinor = gelatoCostMinor < FREE_SHIPPING_THRESHOLD_MINOR ? 0 : gelatoCostMinor;
     shippingMethodUid = chosen.shipmentMethodUid;
     shippingMethodName = chosen.name;
   } catch (err) {
