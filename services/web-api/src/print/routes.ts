@@ -15,6 +15,7 @@ import { gelatoFromEnv, GelatoError } from "./gelato/client";
 import { priceItem, lowestUnitPriceMinor, PricingError } from "./pricing";
 import { generateOrderNumber } from "./order-number";
 import { fulfillOrder } from "./fulfillment";
+import { sendPrintOrderConfirmation } from "./email";
 import { uploadPreorderDesign, validateDesignDataUrl } from "./storage";
 import type { PrintProduct, PrintCategory, PrintAddon, PrintQtyVariant } from "@shared/schema";
 
@@ -453,6 +454,8 @@ const CheckoutRequestSchema = z.object({
   }),
   /** Valgt frakt-metode (shipmentMethodUid fra /quote). Utelatt → billigste. */
   shipmentMethodUid: z.string().optional(),
+  /** Språk for ordrebekreftelse-e-post (en/nb/sv/es). Utelatt → en. */
+  locale: z.string().max(8).optional(),
   /** Returnerer-URL etter Stripe checkout — frontend setter denne basert
    *  på sin egen routing. */
   returnBaseUrl: z.string().url(),
@@ -666,6 +669,9 @@ async function handleCheckout(req: Request, res: Response) {
       print_order_id: orderId,
       print_order_number: orderNumber,
       kind: "print_order",
+      // For ordrebekreftelse-e-posten (sendes fra webhook-handleren).
+      locale: body.locale || "en",
+      app_base_url: body.returnBaseUrl,
     },
     success_url: `${body.returnBaseUrl}/print/order/${orderNumber}?session={CHECKOUT_SESSION_ID}`,
     cancel_url: `${body.returnBaseUrl}/print/checkout?canceled=1`,
@@ -869,9 +875,71 @@ export async function handlePrintCheckoutCompleted(session: Stripe.Checkout.Sess
     [session.payment_intent as string, printOrderId],
   );
 
+  // Ordrebekreftelse-e-post — best-effort, blokkerer ikke fulfillment.
+  // (Stripe sender egen betalingskvittering; dette er ordredetaljene.)
+  try {
+    await sendPrintOrderConfirmationFor(printOrderId, session);
+  } catch (err) {
+    console.error(`[stripe→print] ordrebekreftelse feilet for ${printOrderId}:`, err);
+  }
+
   // Trigger fulfillment async — vi vil ikke blokkere webhook-svaret.
   fulfillOrder(printOrderId).catch((err) => {
     console.error(`[stripe→print] fulfillment feilet for ${printOrderId}:`, err);
+  });
+}
+
+/** Henter ordre + linjer og sender ordrebekreftelse-e-post. */
+async function sendPrintOrderConfirmationFor(
+  printOrderId: string,
+  session: Stripe.Checkout.Session,
+): Promise<void> {
+  const o = await pool.query(
+    `SELECT order_number, customer_email, total_minor, shipping_minor, shipping_address
+     FROM print_orders WHERE id=$1`,
+    [printOrderId],
+  );
+  const row = o.rows[0];
+  if (!row) return;
+
+  const its = await pool.query(
+    `SELECT oi.quantity, oi.line_total_minor, oi.product_slug,
+            p.display_name AS "displayName"
+     FROM print_order_items oi
+     LEFT JOIN print_products p ON p.slug = oi.product_slug
+     WHERE oi.order_id=$1 ORDER BY oi.created_at`,
+    [printOrderId],
+  );
+
+  const locale = session.metadata?.locale || "en";
+  const localeKey = locale.toLowerCase().startsWith("nb") || locale.toLowerCase().startsWith("no")
+    ? "no" : locale.slice(0, 2);
+  const pickName = (dn: Record<string, string> | null, fallback: string) =>
+    (dn && (dn[localeKey] || dn.no || dn.en || Object.values(dn)[0])) || fallback;
+
+  const appBase = (session.metadata?.app_base_url || "").replace(/\/$/, "");
+  const addr = (row.shipping_address || {}) as Record<string, string>;
+
+  await sendPrintOrderConfirmation({
+    orderNumber: row.order_number,
+    customerEmail: row.customer_email,
+    locale,
+    items: its.rows.map((r) => ({
+      name: pickName(r.displayName, r.product_slug),
+      quantity: r.quantity,
+      lineTotalMinor: r.line_total_minor,
+    })),
+    shippingMinor: row.shipping_minor,
+    totalMinor: row.total_minor,
+    shipping: {
+      name: addr.name || "",
+      line1: addr.line1 || "",
+      line2: addr.line2 || undefined,
+      postalCode: addr.postCode || addr.postalCode || "",
+      city: addr.city || "",
+      country: addr.country || "",
+    },
+    statusUrl: appBase ? `${appBase}/print/order/${row.order_number}` : "",
   });
 }
 
