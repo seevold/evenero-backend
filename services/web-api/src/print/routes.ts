@@ -12,7 +12,7 @@ import { randomUUID } from "crypto";
 import Stripe from "stripe";
 import { pool } from "../db";
 import { gelatoFromEnv, GelatoError } from "./gelato/client";
-import { priceItem, lowestUnitPriceMinor, lowestLineTotalMinor, PricingError } from "./pricing";
+import { priceItem, lowestUnitPriceMinor, PricingError } from "./pricing";
 import { generateOrderNumber } from "./order-number";
 import { fulfillOrder } from "./fulfillment";
 import { uploadPreorderDesign, validateDesignDataUrl } from "./storage";
@@ -179,12 +179,12 @@ function buildCatalogResponse(catalog: CatalogCache, country?: string) {
     const minQty = flatProducts.length
       ? Math.min(...flatProducts.map((p) => (p.qtyVariants as unknown as PrintQtyVariant[])[0]?.qty || 1))
       : 1;
-    const fromPriceMode = c.presentationMode === "quantity" ? "per_unit" : "total";
+    // "fra X kr/stk" — alltid laveste pris-per-enhet, så plakat vises
+    // konsistent med kort (ikke 1-stk-totalprisen, som er dyrest per enhet).
+    const fromPriceMode = "per_unit" as const;
     const fromPriceMinor = flatProducts.length === 0
       ? 0
-      : Math.min(...flatProducts.map((p) =>
-          fromPriceMode === "per_unit" ? lowestUnitPriceMinor(p) : lowestLineTotalMinor(p),
-        ));
+      : Math.min(...flatProducts.map((p) => lowestUnitPriceMinor(p)));
     return {
       slug: c.slug,
       formatFamily: c.formatFamily,
@@ -373,14 +373,14 @@ async function handleQuote(req: Request, res: Response) {
   if (!shippingOptions.length) {
     return res.status(400).json({
       error: "NO_SHIPPING_AVAILABLE",
-      message: "Gelato fant ingen leveringsmuligheter for kombinasjonen",
+      message: "Fant ingen leveringsmuligheter for denne kombinasjonen",
     });
   }
 
   return res.json({
     items: pricedItems,
     subtotalMinor,
-    bundleDiscountMinor: bundleDiscountMinor(pricedItems.length),
+    bundleDiscountMinor: bundleDiscountMinor(pricedItems.length, subtotalMinor),
     currency: "nok",                          // Stripe Adaptive Pricing håndterer FX
     shippingOptions,
     estimatedDelivery: estDelivery,
@@ -390,10 +390,11 @@ async function handleQuote(req: Request, res: Response) {
 
 /**
  * Pakkerabatt: når kunden bestiller 2+ produkter sendes alt i én forsendelse
- * — vi sparer frakt og gir besparelsen tilbake. Flat 50 kr ved 2+ produkter.
+ * — vi sparer frakt og gir besparelsen tilbake. 10 % avslag ved 2+ produkter.
  */
-function bundleDiscountMinor(itemCount: number): number {
-  return itemCount >= 2 ? 5000 : 0;
+const BUNDLE_DISCOUNT_RATE = 0.10;
+function bundleDiscountMinor(itemCount: number, subtotalMinor: number): number {
+  return itemCount >= 2 ? Math.round(subtotalMinor * BUNDLE_DISCOUNT_RATE) : 0;
 }
 
 function cheapest<T extends { price: number }>(arr: T[]): T {
@@ -536,7 +537,7 @@ async function handleCheckout(req: Request, res: Response) {
     throw err;
   }
 
-  const discountMinor = bundleDiscountMinor(pricedItems.length);
+  const discountMinor = bundleDiscountMinor(pricedItems.length, subtotalMinor);
   const totalMinor = subtotalMinor + shippingMinor - discountMinor;
 
   // Opprett print_order-rad. Vi setter gelato_order_reference_id allerede
@@ -808,7 +809,7 @@ async function handleGelatoWebhook(req: Request, res: Response) {
       );
     } else if (status === "canceled") {
       await pool.query(
-        `UPDATE print_orders SET status='cancelled', updated_at=NOW(), failure_reason='Gelato cancelled order'
+        `UPDATE print_orders SET status='cancelled', updated_at=NOW(), failure_reason='Bestillingen ble kansellert hos trykkeriet'
          WHERE gelato_order_reference_id=$1`,
         [orderRef],
       );

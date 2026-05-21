@@ -85,7 +85,7 @@ export class GelatoClient {
         let parsed: unknown;
         try { parsed = JSON.parse(text); } catch { parsed = text; }
         throw new GelatoError(
-          `Gelato ${method} ${url} → ${res.status}: ${text.slice(0, 200)}`,
+          `Trykkeri-API ${method} ${url} → ${res.status}: ${text.slice(0, 200)}`,
           res.status,
           parsed,
         );
