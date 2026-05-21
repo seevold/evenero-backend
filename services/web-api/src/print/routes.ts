@@ -8,7 +8,7 @@
 
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
-import { randomUUID } from "crypto";
+import { randomUUID, createHmac, timingSafeEqual } from "crypto";
 import Stripe from "stripe";
 import { pool } from "../db";
 import { gelatoFromEnv, GelatoError } from "./gelato/client";
@@ -764,23 +764,53 @@ async function handleGetOrder(req: Request, res: Response) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// GET /orders/by-event/:eventId — kundens print-bestillinger for et event.
+// Returnerer kun ikke-sensitive felter (ingen e-post/adresse) — ordrenummeret
+// fungerer som tilgangsnøkkel til den fulle status-siden.
+// ─────────────────────────────────────────────────────────────────────────
+
+async function handleGetOrdersByEvent(req: Request, res: Response) {
+  const eventId = req.params.eventId;
+  if (!eventId) return res.status(400).json({ error: "MISSING_EVENT_ID" });
+  const rows = await pool.query(
+    `SELECT DISTINCT o.order_number, o.status, o.total_minor, o.created_at,
+            (SELECT COUNT(*)::int FROM print_order_items WHERE order_id = o.id) AS item_count
+     FROM print_orders o
+     JOIN print_order_items oi ON oi.order_id = o.id
+     WHERE oi.source_event_id = $1
+       AND o.status NOT IN ('pending')
+     ORDER BY o.created_at DESC
+     LIMIT 25`,
+    [eventId],
+  );
+  return res.json({ orders: rows.rows });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // POST /webhooks/gelato — status-oppdateringer fra Gelato
 // ─────────────────────────────────────────────────────────────────────────
 
+/** Konstant-tids strengsammenligning (HMAC-er begge → ingen lengde-lekkasje). */
+function safeEqual(a: string, b: string): boolean {
+  const h = (s: string) => createHmac("sha256", "evenero-webhook-cmp").update(s).digest();
+  return timingSafeEqual(h(a), h(b));
+}
+
 async function handleGelatoWebhook(req: Request, res: Response) {
-  // Gelato sender signed payload — vi verifiserer hvis secret er konfigurert.
-  // Bevisst designvalg: vi lagrer ALLE events i audit-tabellen, også de
-  // som ikke kan parses, så vi har full forensikk hvis noe går galt.
-  const sig = req.headers["gelato-signature"] as string | undefined;
+  // Gelato signerer ikke webhooks med HMAC — endepunktet sikres med et
+  // hemmelig token i webhook-URL-en (?token=… eller X-Webhook-Token-header).
+  // Token settes i Gelato-dashboardet OG i GELATO_WEBHOOK_SECRET env-var.
+  // Bevisst designvalg: vi lagrer ALLE events i audit-tabellen, også avviste,
+  // så vi har full forensikk hvis noe går galt.
   const secret = process.env.GELATO_WEBHOOK_SECRET;
+  const provided =
+    (typeof req.query.token === "string" ? req.query.token : "") ||
+    (req.headers["x-webhook-token"] as string | undefined) || "";
   let signatureValid = true;
-  if (secret && sig) {
-    // Gelato bruker HMAC-SHA256 av raw body med secret. Implementer ved
-    // behov — for nå loggfører vi forsøket. Webhook-verifisering kreves
-    // før prod-cutover (TODO i README).
-    signatureValid = true;  // placeholder
-  } else if (secret && !sig) {
-    signatureValid = false;
+  if (secret) {
+    signatureValid = safeEqual(provided, secret);
+  } else {
+    console.warn("[gelato-webhook] GELATO_WEBHOOK_SECRET ikke satt — godtar uten verifisering");
   }
 
   const payload = req.body as Record<string, unknown>;
@@ -970,6 +1000,10 @@ export function registerPrintRoutes(app: Express) {
 
   app.post("/api/print/checkout", async (req, res, next) => {
     try { await handleCheckout(req, res); } catch (e) { next(e); }
+  });
+
+  app.get("/api/print/orders/by-event/:eventId", async (req, res, next) => {
+    try { await handleGetOrdersByEvent(req, res); } catch (e) { next(e); }
   });
 
   app.get("/api/print/orders/:orderNumber", async (req, res, next) => {
