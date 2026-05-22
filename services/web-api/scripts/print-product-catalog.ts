@@ -142,6 +142,23 @@ const CARD_ADDONS: ProductAddonDef[] = [
   },
 ];
 
+// Square-kort: kun avrundede hjørner. Gelato støtter ikke matt/ubelagt
+// papir for kvadratisk pack_of_cards (ugyldig SKU-kombinasjon).
+const SQUARE_ADDONS: ProductAddonDef[] = [
+  {
+    slug: "rounded_corners",
+    label: { no: "Avrundede hjørner", en: "Rounded corners", sv: "Rundade hörn", es: "Esquinas redondeadas" },
+    description: {
+      no: "8 mm avrunding på alle fire hjørner",
+      en: "8 mm rounding on all four corners",
+      sv: "8 mm rundning på alla fyra hörn",
+      es: "Redondeo de 8 mm en las cuatro esquinas",
+    },
+    uidReplace: { from: "set_none", to: "set_round-8mm" },
+    surchargeMode: "per_unit",
+  },
+];
+
 const CARD_PRODUCT_INFO = {
   paper: { no: "350 g/m² silke-belagt (standard)", en: "350 gsm silk-coated (default)", sv: "350 g/m² silke (standard)", es: "350 g/m² satinado (predet.)" },
   sides: { no: "Trykk på begge sider", en: "Double-sided print", sv: "Tryck på båda sidor", es: "Impresión doble cara" },
@@ -220,7 +237,7 @@ export const PRODUCTS: ProductDef[] = [
       { qty: 10 },
       { qty: 20 },
     ],
-    addons: CARD_ADDONS,
+    addons: SQUARE_ADDONS,
     expressSurchargeMinor: 5000,
     markupTargetPct: 60,
     allowedCountries: COUNTRIES_CARDS,
