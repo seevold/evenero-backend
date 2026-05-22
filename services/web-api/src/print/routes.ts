@@ -665,6 +665,10 @@ async function handleCheckout(req: Request, res: Response) {
     mode: "payment",
     payment_method_types: ["card"],
     line_items: lineItems,
+    // Lar kunden taste en rabattkode i Stripe Checkout. Koder forvaltes
+    // i Stripe (Coupons + Promotion codes) — en 100 %-kode gir 0 å betale
+    // og lar oss kjøre en ekte ordre helt gjennom uten betaling.
+    allow_promotion_codes: true,
     customer_email: body.customerEmail,
     metadata: {
       print_order_id: orderId,
