@@ -503,16 +503,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create Stripe Checkout Session for embedded form
   app.post("/api/create-checkout-session", async (req, res) => {
     try {
-      const { referralId, buyerCountry, customerEmail, couponCode, endorselyReferral, metaEventId, fbp, fbc } = req.body;
+      const { buyerCountry, customerEmail, couponCode, metaEventId, fbp, fbc } = req.body;
 
       // Prepare metadata for tracking
       const metadata: any = {};
-      if (referralId) {
-        metadata.promotekit_referral = referralId;
-      }
-      if (endorselyReferral) {
-        metadata.endorsely_referral = endorselyReferral;
-      }
       if (buyerCountry) {
         metadata.buyer_country = buyerCountry;
       }
