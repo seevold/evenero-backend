@@ -245,9 +245,11 @@ async function handleCheckoutSessionCompleted(session: any): Promise<void> {
   await storage.createPayment(paymentData);
   console.log(`[webhook] payment saved: ${paymentIntent.id} type=${meta.productType} credits=${meta.creditsGranted}`);
 
-  // 3. Meta Purchase tracking (uendret)
+  // 3. Meta Purchase tracking — kun ved marketing-samtykke (GDPR).
+  // Historiske kjøp uten flagget defaulter til false (konservativt).
   const metaEventId = session.metadata?.meta_event_id;
-  if (metaEventId) {
+  const marketingConsent = session.metadata?.marketing_consent === 'true';
+  if (metaEventId && marketingConsent) {
     const userData = {
       email,
       clientIpAddress: session.metadata?.client_ip,
@@ -258,6 +260,8 @@ async function handleCheckoutSessionCompleted(session: any): Promise<void> {
     const eventSourceUrl = session.success_url?.split('?')[0] || 'https://evenero.com/payment-success';
     trackPurchase(userData, eventSourceUrl, paymentIntent.currency, paymentIntent.amount / 100, metaEventId)
       .catch(error => console.error('[webhook] Meta Purchase tracking failed:', error));
+  } else if (metaEventId) {
+    console.log('[webhook] ⏸️  No marketing consent on session, skipping Meta Purchase (GDPR)');
   }
 }
 
@@ -503,10 +507,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create Stripe Checkout Session for embedded form
   app.post("/api/create-checkout-session", async (req, res) => {
     try {
-      const { buyerCountry, customerEmail, couponCode, metaEventId, fbp, fbc } = req.body;
+      const { buyerCountry, customerEmail, couponCode, metaEventId, marketingConsent, fbp, fbc } = req.body;
 
-      // Prepare metadata for tracking
-      const metadata: any = {};
+      // Prepare metadata for tracking. marketing_consent lagres alltid (true/false)
+      // så webhook-en senere kan gate Meta CAPI uten å gjette.
+      const metadata: any = {
+        marketing_consent: marketingConsent === true ? 'true' : 'false',
+      };
       if (buyerCountry) {
         metadata.buyer_country = buyerCountry;
       }
@@ -537,8 +544,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         metadata.fbc = fbc;
       }
       
-      // Track InitiateCheckout with Meta Conversion API
-      if (metaEventId) {
+      // Track InitiateCheckout with Meta Conversion API — kun ved marketing-samtykke (GDPR).
+      if (metaEventId && marketingConsent === true) {
         console.log('🎯 Checkout: Starting Meta InitiateCheckout tracking', {
           event_id: metaEventId,
           has_email: !!customerEmail,
@@ -561,8 +568,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         trackInitiateCheckout(userData, eventSourceUrl, metaEventId).catch(error => {
           console.error('❌ Failed to track InitiateCheckout with Meta Conversion API:', error);
         });
-      } else {
+      } else if (!metaEventId) {
         console.log('⚠️ Checkout: No metaEventId provided, skipping Meta tracking');
+      } else {
+        console.log('⏸️  Checkout: No marketing consent, skipping Meta InitiateCheckout (GDPR)');
       }
 
       const stripeData = await getStripePriceData();
