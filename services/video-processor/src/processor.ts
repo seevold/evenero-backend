@@ -3,13 +3,13 @@ import { stat } from 'node:fs/promises';
 import { config } from './config.js';
 import { ffprobe, shouldSkipReencode, type ProbeResult } from './probe.js';
 
-export type EncodeStrategy = 'remux' | 'reencode' | 'skipped-too-long' | 'skipped-too-big' | 'skipped-encode-timeout';
+export type EncodeStrategy = 'remux' | 'reencode' | 'skipped-too-long' | 'skipped-too-big' | 'skipped-encode-timeout' | 'skipped-poster-failed';
 
 export type ProcessResult = {
   strategy: EncodeStrategy;
   probe: ProbeResult;
   previewBytes: number | null;  // null hvis preview ble skipped
-  posterBytes: number;
+  posterBytes: number | null;   // null hvis poster ikke ble generert (skipped-poster-failed)
   encodeMs: number;
   posterMs: number;
 };
@@ -118,11 +118,26 @@ export async function processVideo(
 ): Promise<ProcessResult> {
   const probe = await ffprobe(inputPath);
 
-  // Poster genereres ALLTID — billig (~1-2 sek), kritisk for galleri.
+  // Poster: best-effort. Vanlig (~1-2 sek), men noen rare codecs / korte
+  // videoer / korrupte filer får ffmpeg til å exit 0 uten å skrive output,
+  // eller å feile på et vis vi ikke kan forutse. Hvis det skjer skipper vi
+  // hele jobben i stedet for å returnere 500 og forårsake Pub/Sub retry-storm.
   const posterStart = Date.now();
-  await makePoster(inputPath, posterPath);
+  let posterStat: { size: number } | null = null;
+  try {
+    await makePoster(inputPath, posterPath);
+    posterStat = await stat(posterPath);
+  } catch (posterErr) {
+    return {
+      strategy: 'skipped-poster-failed',
+      probe,
+      previewBytes: null,
+      posterBytes: null,
+      encodeMs: 0,
+      posterMs: Date.now() - posterStart,
+    };
+  }
   const posterMs = Date.now() - posterStart;
-  const posterStat = await stat(posterPath);
 
   // Varsle caller om at poster er klar — de starter upload i parallell
   // med encoding under

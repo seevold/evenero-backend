@@ -63,7 +63,14 @@ export async function uploadFile(
   });
 }
 
+// Idempotency-sjekk: returnerer true hvis jobben allerede er prosessert,
+// enten med suksess (preview.mp4) eller best-effort-skip (preview-skipped.json).
+// Begge teller — vi vil ikke re-prosessere en skipped fil og risikere samme
+// krasj igjen.
 export async function previewAlreadyExists(eventId: string, mediaId: string): Promise<boolean> {
-  const [exists] = await bucket.file(previewOutputPath(eventId, mediaId)).exists();
-  return exists;
+  const [[previewExists], [skippedExists]] = await Promise.all([
+    bucket.file(previewOutputPath(eventId, mediaId)).exists(),
+    bucket.file(skippedFlagPath(eventId, mediaId)).exists(),
+  ]);
+  return previewExists || skippedExists;
 }
