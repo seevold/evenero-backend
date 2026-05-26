@@ -23,8 +23,12 @@ export const config = {
   skipMaxBitrate: parseInt(process.env.SKIP_MAX_BITRATE || '4500000', 10), // 4.5 Mbps
   skipCodecs: (process.env.SKIP_CODECS || 'h264').split(','),
 
-  // Hard cap mot megastore videoer (avviser meldingen helt — ikke download).
-  maxInputBytes: parseInt(process.env.MAX_INPUT_BYTES || String(5 * 1024 * 1024 * 1024), 10), // 5 GB
+  // Hard cap mot megastore videoer (skipper med en gang, lar frontend bruke original).
+  // Selv om vi nå streamer input via HTTP (ikke download til tmpfs), tar selve
+  // encoding for stort grunnlag absurd lang tid på 4 vCPU og treffer encodeTimeoutMs.
+  // 1 GB er nok for 4K-videoer på flere minutter — alt over er sannsynligvis et
+  // sluttbruker-misforståelse uansett.
+  maxInputBytes: parseInt(process.env.MAX_INPUT_BYTES || String(1 * 1024 * 1024 * 1024), 10), // 1 GB
 
   // Best-effort caps: hvis source er over disse, hopper vi over preview-encoding
   // og lar frontend falle tilbake på original. Skipped-flag skrives så frontend

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { config } from './config.js';
 import { processVideo } from './processor.js';
 import {
-  downloadObjectToFile,
+  getSignedReadUrl,
   parseInputPath,
   previewAlreadyExists,
   previewOutputPath,
@@ -96,7 +96,6 @@ app.post('/', async (req, res) => {
 
   const { eventId, mediaId, ext } = parsed;
   const tempDir = await mkdtemp(join(tmpdir(), 'vid-'));
-  const inputPath = join(tempDir, `in.${ext}`);
   const previewPath = join(tempDir, 'preview.mp4');
   const posterPath = join(tempDir, 'poster.jpg');
 
@@ -106,9 +105,14 @@ app.post('/', async (req, res) => {
       return res.status(204).end();
     }
 
+    // Vi laster IKKE ned kildefilen til lokal tmpfs (= RAM på Cloud Run).
+    // I stedet får ffmpeg en signed read-URL og HTTP-range-requester bytes
+    // etter behov. Sparer 4 GiB-budsjettet for selve encoding-arbeidet,
+    // ikke for å holde råfilen i minne. Signed URL er gyldig 30 min —
+    // dekker encodeTimeoutMs (8 min) med god margin.
     const t0 = Date.now();
-    await downloadObjectToFile(event.name, inputPath);
-    const downloadMs = Date.now() - t0;
+    const inputUrl = await getSignedReadUrl(event.name);
+    const signedUrlMs = Date.now() - t0;
 
     // Start poster-upload SÅ SNART poster.jpg er klar (callback fra processVideo),
     // parallellt med preview-encoding. Galleri-thumbnail er tilgjengelig på
@@ -116,7 +120,7 @@ app.post('/', async (req, res) => {
     const t2 = Date.now();
     let posterUploadPromise: Promise<void> = Promise.resolve();
     const result = await processVideo(
-      inputPath,
+      inputUrl,
       previewPath,
       posterPath,
       sourceBytes,
@@ -163,7 +167,7 @@ app.post('/', async (req, res) => {
         sourceBitrate: result.probe.bitrate,
         previewBytes: result.previewBytes,
         posterBytes: result.posterBytes,
-        downloadMs,
+        signedUrlMs,
         encodeMs: result.encodeMs,
         posterMs: result.posterMs,
         uploadMs,
