@@ -1,15 +1,24 @@
 import { Storage } from '@google-cloud/storage';
-import { createWriteStream } from 'node:fs';
-import { pipeline } from 'node:stream/promises';
 import { config } from './config.js';
 
 const storage = new Storage();
 const bucket = storage.bucket(config.bucket);
 
-export async function downloadObjectToFile(objectName: string, destPath: string): Promise<void> {
-  const readStream = bucket.file(objectName).createReadStream();
-  const writeStream = createWriteStream(destPath);
-  await pipeline(readStream, writeStream);
+// Genererer en v4 signed URL som ffmpeg kan lese med HTTP range-requests.
+// Vi unngår dermed å laste hele kildefilen til Cloud Runs tmpfs (= RAM),
+// som tidligere kunne sprenge 4 GiB-budsjettet på store videoer.
+// Krever at service-account har iam.serviceAccountTokenCreator på seg selv
+// (signing skjer via IAM API på Cloud Run — ingen private key i credential).
+export async function getSignedReadUrl(
+  objectName: string,
+  expiresInMs = 30 * 60 * 1000,
+): Promise<string> {
+  const [url] = await bucket.file(objectName).getSignedUrl({
+    version: 'v4',
+    action: 'read',
+    expires: Date.now() + expiresInMs,
+  });
+  return url;
 }
 
 export function parseInputPath(
