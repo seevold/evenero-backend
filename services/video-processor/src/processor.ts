@@ -14,6 +14,17 @@ export type ProcessResult = {
   posterMs: number;
 };
 
+// Standardiserte ffmpeg HTTP-reconnect-flags. Må komme FØR -i når inputen
+// er en URL — input vil være en signed GCS URL i prod, ikke en lokal fil,
+// og ffmpeg kan miste tilkoblingen midt under encoding av lange videoer.
+const HTTP_RECONNECT_FLAGS = [
+  '-reconnect', '1',
+  '-reconnect_streamed', '1',
+  '-reconnect_on_network_error', '1',
+  '-reconnect_on_http_error', '5xx',
+  '-reconnect_delay_max', '30',
+];
+
 function runFfmpeg(args: string[], timeoutMs?: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -51,7 +62,9 @@ function runFfmpeg(args: string[], timeoutMs?: number): Promise<void> {
 
 async function remux(input: string, output: string, timeoutMs: number): Promise<void> {
   await runFfmpeg([
-    '-y', '-i', input,
+    '-y',
+    ...HTTP_RECONNECT_FLAGS,
+    '-i', input,
     '-c', 'copy',
     '-movflags', '+faststart',
     output,
@@ -60,7 +73,9 @@ async function remux(input: string, output: string, timeoutMs: number): Promise<
 
 async function reencode(input: string, output: string, timeoutMs: number): Promise<void> {
   await runFfmpeg([
-    '-y', '-i', input,
+    '-y',
+    ...HTTP_RECONNECT_FLAGS,
+    '-i', input,
     '-c:v', 'libx264',
     '-preset', config.preset,
     '-crf', String(config.crf),
@@ -79,11 +94,31 @@ async function reencode(input: string, output: string, timeoutMs: number): Promi
   ], timeoutMs);
 }
 
-async function makePoster(input: string, output: string): Promise<void> {
+// Parse "HH:MM:SS[.ms]" eller en tallstreng ("1.5") til sekunder.
+// Faller tilbake til 0 hvis input ikke kan tolkes.
+function parseTimestampToSec(s: string): number {
+  if (s.includes(':')) {
+    const parts = s.split(':').map(parseFloat);
+    if (parts.some((n) => Number.isNaN(n))) return 0;
+    const [h, m, sec] = parts.length === 3 ? parts : [0, parts[0] ?? 0, parts[1] ?? 0];
+    return h * 3600 + m * 60 + sec;
+  }
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function makePoster(input: string, output: string, durationSec: number): Promise<void> {
   // Kort timeout — poster er bare første frame.
+  // Klamp seek-tid til durationSec/2 så vi alltid treffer en faktisk frame —
+  // ellers vil videoer kortere enn posterTimestamp gi exit 0 uten output
+  // (ffmpeg seeker forbi slutten). Midtpunktet er en grei thumbnail for
+  // korte klipp og bevarer "1 sek inn"-oppførselen for normale videoer.
+  const targetSec = parseTimestampToSec(config.posterTimestamp);
+  const effectiveSec = durationSec > 0 ? Math.min(targetSec, durationSec / 2) : 0;
   await runFfmpeg([
     '-y',
-    '-ss', config.posterTimestamp,
+    ...HTTP_RECONNECT_FLAGS,
+    '-ss', effectiveSec.toFixed(3),
     '-i', input,
     '-frames:v', '1',
     '-vf', `scale=${config.posterWidth}:-2`,
@@ -125,7 +160,7 @@ export async function processVideo(
   const posterStart = Date.now();
   let posterStat: { size: number } | null = null;
   try {
-    await makePoster(inputPath, posterPath);
+    await makePoster(inputPath, posterPath, probe.durationSec);
     posterStat = await stat(posterPath);
   } catch (posterErr) {
     return {

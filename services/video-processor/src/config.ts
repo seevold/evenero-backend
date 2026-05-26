@@ -23,7 +23,11 @@ export const config = {
   skipMaxBitrate: parseInt(process.env.SKIP_MAX_BITRATE || '4500000', 10), // 4.5 Mbps
   skipCodecs: (process.env.SKIP_CODECS || 'h264').split(','),
 
-  // Hard cap mot megastore videoer (avviser meldingen helt — ikke download).
+  // Hard cap mot ekstreme filer (skipper helt, lar frontend bruke original).
+  // Vi streamer input via HTTP fra GCS (ikke download til tmpfs), så caps er
+  // ikke memory-bundet. Praktisk skiller maxPreviewBytes (500 MB) — videoer
+  // over den skipper preview-encoding uansett (frontend bruker original).
+  // Denne cap-en er bare en sanity-grense mot absurde uploads.
   maxInputBytes: parseInt(process.env.MAX_INPUT_BYTES || String(5 * 1024 * 1024 * 1024), 10), // 5 GB
 
   // Best-effort caps: hvis source er over disse, hopper vi over preview-encoding
