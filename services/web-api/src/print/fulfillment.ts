@@ -14,7 +14,7 @@ import { gelatoFromEnv, GelatoError } from "./gelato/client";
 import { renderToPdf } from "./pdf";
 import { buildTwoSidedPdfFromImage, pageCountForGelatoUid, GELATO_DEFAULT_BLEED_MM } from "./pdf/two-sided";
 import { uploadPrintPdf, verifyDesignUrlReachable } from "./storage";
-import { sendFulfillmentFailureAlert } from "./email";
+import { sendFulfillmentFailureAlert, sendPrintOrderShipped, type PrintShipmentInfo } from "./email";
 import type { GelatoOrderItem } from "./gelato/types";
 
 export interface FulfillResult {
@@ -154,6 +154,150 @@ export async function refreshShipmentsFromGelato(
   );
 
   return { shipments, newPackageIds };
+}
+
+/**
+ * Synker hele ordre-staten fra Gelato — status-overgang + shipments-array.
+ * Single source of truth som BÅDE webhook-handler og polling-job kaller.
+ *
+ * Garantier:
+ *   - Idempotent: trygt å kalle flere ganger med samme Gelato-state
+ *   - Self-healing: hvis status er bak Gelato (eks. webhook missed), tar
+ *     denne oss til riktig state ved neste kall
+ *   - Triggrer shipped-mail KUN første gang vi krysser shipped-grensen
+ *     (atomisk via UPDATE ... WHERE shipped_at IS NULL ... RETURNING)
+ *
+ * Returnerer hva som faktisk endret seg så caller (eks. polling-job) kan
+ * loggføre antall faktiske oppdateringer.
+ */
+export interface SyncResult {
+  statusChanged: boolean;
+  newStatus: string;
+  shipmentsCount: number;
+  newPackageIds: string[];
+  shippedMailSent: boolean;
+}
+
+export async function syncOrderFromGelato(orderId: string): Promise<SyncResult> {
+  const r = await pool.query<{
+    gelato_order_id: string | null;
+    order_number: string;
+    customer_email: string;
+    locale: string;
+    app_base_url: string;
+    status: string;
+    shipped_at: Date | null;
+  }>(
+    `SELECT gelato_order_id, order_number, customer_email, locale,
+            app_base_url, status, shipped_at
+     FROM print_orders WHERE id=$1`,
+    [orderId],
+  );
+  const row = r.rows[0];
+  if (!row?.gelato_order_id) {
+    return { statusChanged: false, newStatus: row?.status || "unknown", shipmentsCount: 0, newPackageIds: [], shippedMailSent: false };
+  }
+
+  const gelato = gelatoFromEnv();
+  const order = await gelato.getOrder(row.gelato_order_id);
+  const gelatoStatus = (order as unknown as { fulfillmentStatus?: string }).fulfillmentStatus || "";
+
+  // Mapp Gelato-status → vår status. Gelato har: draft, uploading, passed,
+  // pending_approval, in_production, printed, shipped, delivered, canceled, failed.
+  // Vi kollapser noen av dem til den samme interne statusen.
+  let targetStatus: string | null = null;
+  if (gelatoStatus === "shipped") targetStatus = "shipped";
+  else if (gelatoStatus === "delivered") targetStatus = "delivered";
+  else if (gelatoStatus === "canceled") targetStatus = "cancelled";
+  else if (["printed", "in_production", "passed", "uploading"].includes(gelatoStatus)) {
+    targetStatus = "in_production";
+  }
+  // Hvis Gelato-status er noe vi ikke håndterer (draft, pending_approval, failed),
+  // lar vi vår status være som den er — webhook eller manuelt inngrep tar over.
+
+  let statusChanged = false;
+  let shippedMailSent = false;
+  let shouldSendShippedMail = false;
+
+  if (targetStatus && targetStatus !== row.status) {
+    // shipped-overgang er spesiell: vi vil trigge mail KUN ved første gang.
+    if (targetStatus === "shipped") {
+      // Sett status + shipped_at atomisk, returnerer was_unshipped-flagget.
+      const upd = await pool.query<{ was_unshipped: boolean }>(
+        `WITH prev AS (
+           SELECT id, shipped_at IS NULL AS was_unshipped FROM print_orders WHERE id=$1
+         )
+         UPDATE print_orders po
+         SET status='shipped', shipped_at=COALESCE(shipped_at, NOW()), updated_at=NOW()
+         FROM prev WHERE po.id = prev.id
+         RETURNING prev.was_unshipped`,
+        [orderId],
+      );
+      statusChanged = true;
+      shouldSendShippedMail = !!upd.rows[0]?.was_unshipped;
+    } else if (targetStatus === "delivered") {
+      await pool.query(
+        `UPDATE print_orders SET status='delivered',
+           delivered_at=COALESCE(delivered_at, NOW()),
+           shipped_at=COALESCE(shipped_at, NOW()),
+           updated_at=NOW()
+         WHERE id=$1`,
+        [orderId],
+      );
+      statusChanged = true;
+    } else if (targetStatus === "cancelled") {
+      await pool.query(
+        `UPDATE print_orders SET status='cancelled',
+           failure_reason=COALESCE(failure_reason, 'Bestillingen ble kansellert hos trykkeriet'),
+           updated_at=NOW() WHERE id=$1`,
+        [orderId],
+      );
+      statusChanged = true;
+    } else if (targetStatus === "in_production") {
+      await pool.query(
+        `UPDATE print_orders SET status='in_production', updated_at=NOW()
+         WHERE id=$1 AND status NOT IN ('shipped','delivered','cancelled')`,
+        [orderId],
+      );
+      statusChanged = true;
+    }
+  }
+
+  // Refresh shipments uansett status — pakker kan komme før status flippes.
+  const { shipments, newPackageIds } = await refreshShipmentsFromGelato(orderId);
+
+  // Send shipped-mail hvis (a) vi nettopp krysset shipped-grensen OG
+  // (b) vi har minst én pakke med tracking. Hvis ingen pakker enda, lar vi
+  // neste polling-iterasjon (eller webhook) trigge mailen når data finnes.
+  if (shouldSendShippedMail && shipments.length > 0) {
+    const appBase = (row.app_base_url || "").replace(/\/$/, "");
+    const statusUrl = appBase ? `${appBase}/print/order/${row.order_number}` : "";
+    const shipmentInfos: PrintShipmentInfo[] = shipments.map((s) => ({
+      trackingCode: s.trackingCode,
+      trackingUrl: s.trackingUrl,
+      carrier: s.carrier,
+    }));
+    try {
+      await sendPrintOrderShipped({
+        orderNumber: row.order_number,
+        customerEmail: row.customer_email,
+        locale: row.locale || "en",
+        shipments: shipmentInfos,
+        statusUrl,
+      });
+      shippedMailSent = true;
+    } catch (err) {
+      console.error(`[sync] shipped-mail feilet for ${row.order_number}:`, err);
+    }
+  }
+
+  return {
+    statusChanged,
+    newStatus: targetStatus || row.status,
+    shipmentsCount: shipments.length,
+    newPackageIds,
+    shippedMailSent,
+  };
 }
 
 /** Last ned en URL til Buffer, eller kast hvis fail/tom. Brukes når vi må

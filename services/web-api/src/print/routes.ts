@@ -14,7 +14,7 @@ import { pool } from "../db";
 import { gelatoFromEnv, GelatoError } from "./gelato/client";
 import { priceItem, lowestUnitPriceMinor, PricingError } from "./pricing";
 import { generateOrderNumber } from "./order-number";
-import { fulfillOrder, refreshShipmentsFromGelato } from "./fulfillment";
+import { fulfillOrder, refreshShipmentsFromGelato, syncOrderFromGelato } from "./fulfillment";
 import { sendPrintOrderConfirmation, sendPrintOrderShipped } from "./email";
 import { formatOrderLineLabel } from "./format";
 import { uploadPreorderDesign, validateDesignDataUrl } from "./storage";
@@ -1065,6 +1065,62 @@ export function registerPrintRoutes(app: Express) {
 
   app.post("/api/webhooks/gelato", async (req, res, next) => {
     try { await handleGelatoWebhook(req, res); } catch (e) { next(e); }
+  });
+
+  // Admin: re-sync ikke-leverte ordrer mot Gelato. Cloud Scheduler kaller
+  // dette hver 30 min som self-healing-fallback i tilfelle webhooks dropper.
+  // Auth: bearer-token (ADMIN_API_TOKEN). Returnerer JSON med oppsummering.
+  app.post("/api/print/admin/refresh-pending", async (req, res, next) => {
+    try {
+      const expected = process.env.ADMIN_API_TOKEN;
+      if (!expected) {
+        return res.status(503).json({ error: "ADMIN_API_TOKEN_NOT_CONFIGURED" });
+      }
+      const provided = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+      if (provided !== expected) {
+        return res.status(401).json({ error: "UNAUTHORIZED" });
+      }
+
+      // Skann ordrer som kan ha hengt seg fast — paid (ikke submitted enda),
+      // submitted (ikke i produksjon enda), in_production (ikke shipped enda).
+      // 30-dager-vindu hindrer at vi spammer Gelato med calls på gamle dødsordrer.
+      const orders = await pool.query<{ id: string; order_number: string; status: string }>(
+        `SELECT id, order_number, status
+         FROM print_orders
+         WHERE status IN ('paid', 'submitted', 'in_production')
+           AND gelato_order_id IS NOT NULL
+           AND created_at > NOW() - INTERVAL '30 days'
+         ORDER BY created_at DESC
+         LIMIT 100`,
+      );
+
+      const results: Array<{ orderNumber: string; before: string; after: string; mailSent: boolean }> = [];
+      const errors: Array<{ orderNumber: string; error: string }> = [];
+
+      for (const o of orders.rows) {
+        try {
+          const r = await syncOrderFromGelato(o.id);
+          if (r.statusChanged || r.newPackageIds.length > 0 || r.shippedMailSent) {
+            results.push({
+              orderNumber: o.order_number,
+              before: o.status,
+              after: r.newStatus,
+              mailSent: r.shippedMailSent,
+            });
+          }
+        } catch (err) {
+          errors.push({ orderNumber: o.order_number, error: (err as Error).message });
+        }
+      }
+
+      console.log(`[admin/refresh-pending] scanned=${orders.rows.length} changed=${results.length} errors=${errors.length}`);
+      res.json({
+        scanned: orders.rows.length,
+        changed: results.length,
+        results,
+        errors,
+      });
+    } catch (e) { next(e); }
   });
 
   // Internal: clear cache (kalles fra seed-script via SIGHUP eller restart).
