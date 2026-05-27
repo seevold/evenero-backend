@@ -35,15 +35,20 @@ export interface PrintOrderEmailData {
   statusUrl: string;
 }
 
+export interface PrintShipmentInfo {
+  trackingCode: string;
+  trackingUrl: string;
+  carrier: string;
+}
+
 export interface PrintOrderShippedEmailData {
   orderNumber: string;
   customerEmail: string;
   locale: string;
-  /** Tracking-URL fra Gelato. Hvis tom → vi viser status-side-knapp i stedet. */
-  trackingUrl?: string | null;
-  trackingCode?: string | null;
-  carrier?: string | null;
-  /** Lenke til status-siden i app-en (fallback når tracking ikke finnes). */
+  /** Liste over pakker. Hvis tom → vi viser status-side-knapp i stedet.
+   *  1 pakke = single tracking-blokk. 2+ pakker = nummerert liste. */
+  shipments: PrintShipmentInfo[];
+  /** Lenke til status-siden i app-en (alltid relevant — vises i alle tilfeller). */
   statusUrl: string;
 }
 
@@ -110,12 +115,18 @@ const STR: Record<Locale, {
 
 const SHIPPED_STR: Record<Locale, {
   subject: string;
+  /** Heading når én pakke vs flere — flere = "Pakkene er på vei!" */
   heading: string;
+  headingMulti: string;
+  /** Intro når én pakke vs flere */
   intro: string;
+  introMulti: string;
   orderLabel: string;
   trackingHeading: string;
   carrierLabel: string;
   trackingCodeLabel: string;
+  /** Når split-pakker: "Pakke 1 av 2", "Pakke 2 av 2" */
+  packageOfTotal: (n: number, total: number) => string;
   trackingButton: string;
   noTrackingNote: string;
   statusButton: string;
@@ -124,12 +135,15 @@ const SHIPPED_STR: Record<Locale, {
   en: {
     subject: "Your order is on its way",
     heading: "Your order has shipped!",
+    headingMulti: "Your packages are on their way!",
     intro: "Your print order has been sent from the printer and is on its way to the delivery address.",
+    introMulti: "Your print order has been shipped in {{n}} separate packages. Each has its own tracking number below.",
     orderLabel: "Order number",
     trackingHeading: "Tracking",
     carrierLabel: "Carrier",
     trackingCodeLabel: "Tracking number",
-    trackingButton: "Track your shipment",
+    packageOfTotal: (n, total) => `Package ${n} of ${total}`,
+    trackingButton: "Track shipment",
     noTrackingNote: "Tracking information will appear here once available.",
     statusButton: "See order status",
     footer: "Need help? Reply to this email.",
@@ -137,11 +151,14 @@ const SHIPPED_STR: Record<Locale, {
   nb: {
     subject: "Bestillingen er sendt",
     heading: "Pakken er på vei!",
+    headingMulti: "Pakkene er på vei!",
     intro: "Trykk-bestillingen din har forlatt trykkeriet og er på vei til leveringsadressen.",
+    introMulti: "Trykk-bestillingen din er sendt i {{n}} separate pakker. Hver har sitt eget sporingsnummer under.",
     orderLabel: "Ordrenummer",
     trackingHeading: "Sporing",
     carrierLabel: "Transportør",
     trackingCodeLabel: "Sporingsnummer",
+    packageOfTotal: (n, total) => `Pakke ${n} av ${total}`,
     trackingButton: "Spor pakken",
     noTrackingNote: "Sporings­informasjon dukker opp her så snart den er klar.",
     statusButton: "Se ordrestatus",
@@ -150,11 +167,14 @@ const SHIPPED_STR: Record<Locale, {
   sv: {
     subject: "Din beställning är på väg",
     heading: "Paketet är på väg!",
+    headingMulti: "Paketen är på väg!",
     intro: "Din tryckbeställning har lämnat tryckeriet och är på väg till leveransadressen.",
+    introMulti: "Din tryckbeställning skickas i {{n}} separata paket. Var och en har sitt eget spårningsnummer nedan.",
     orderLabel: "Ordernummer",
     trackingHeading: "Spårning",
     carrierLabel: "Transportör",
     trackingCodeLabel: "Spårningsnummer",
+    packageOfTotal: (n, total) => `Paket ${n} av ${total}`,
     trackingButton: "Spåra paketet",
     noTrackingNote: "Spårningsinformation dyker upp här så fort den är tillgänglig.",
     statusButton: "Se orderstatus",
@@ -163,12 +183,15 @@ const SHIPPED_STR: Record<Locale, {
   es: {
     subject: "Tu pedido está en camino",
     heading: "¡Tu pedido ha sido enviado!",
+    headingMulti: "¡Tus paquetes están en camino!",
     intro: "Tu pedido de impresión ha salido de la imprenta y está en camino a la dirección de entrega.",
+    introMulti: "Tu pedido de impresión se ha enviado en {{n}} paquetes separados. Cada uno tiene su propio número de seguimiento abajo.",
     orderLabel: "Número de pedido",
     trackingHeading: "Seguimiento",
     carrierLabel: "Transportista",
     trackingCodeLabel: "Número de seguimiento",
-    trackingButton: "Seguir el envío",
+    packageOfTotal: (n, total) => `Paquete ${n} de ${total}`,
+    trackingButton: "Seguir paquete",
     noTrackingNote: "La información de seguimiento aparecerá aquí cuando esté disponible.",
     statusButton: "Ver estado del pedido",
     footer: "¿Necesitas ayuda? Responde a este correo.",
@@ -337,28 +360,48 @@ export async function sendPrintOrderConfirmation(data: PrintOrderEmailData): Pro
 
 // ─── Shipped-mail ───────────────────────────────────────────────────────────
 
-function renderShippedHtml(s: typeof SHIPPED_STR[Locale], d: PrintOrderShippedEmailData): string {
-  const hasTracking = !!(d.trackingUrl || d.trackingCode);
-  const ctaUrl = d.trackingUrl || d.statusUrl;
-  const ctaLabel = d.trackingUrl ? s.trackingButton : s.statusButton;
-
-  const trackingDetails = hasTracking ? `
+/** Render én tracking-blokk (carrier/kode/spor-knapp) — gjenbrukes i loop for split. */
+function renderShipmentBlock(
+  s: typeof SHIPPED_STR[Locale],
+  shipment: PrintShipmentInfo,
+  label: string | null,
+): string {
+  return `
         <tr><td style="padding:20px 32px 0;">
-          <div style="font-size:13px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.04em;">${esc(s.trackingHeading)}</div>
+          ${label
+            ? `<div style="font-size:13px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.04em;">${esc(label)}</div>`
+            : `<div style="font-size:13px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.04em;">${esc(s.trackingHeading)}</div>`}
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px;font-size:14px;">
-            ${d.carrier ? `<tr>
-              <td style="padding:6px 0;color:#888;width:120px;">${esc(s.carrierLabel)}</td>
-              <td style="padding:6px 0;color:#333;font-weight:500;">${esc(d.carrier)}</td>
+            ${shipment.carrier ? `<tr>
+              <td style="padding:6px 0;color:#888;width:140px;">${esc(s.carrierLabel)}</td>
+              <td style="padding:6px 0;color:#333;font-weight:500;">${esc(shipment.carrier)}</td>
             </tr>` : ""}
-            ${d.trackingCode ? `<tr>
+            ${shipment.trackingCode ? `<tr>
               <td style="padding:6px 0;color:#888;">${esc(s.trackingCodeLabel)}</td>
-              <td style="padding:6px 0;color:#333;font-family:monospace;">${esc(d.trackingCode)}</td>
+              <td style="padding:6px 0;color:#333;font-family:monospace;">${esc(shipment.trackingCode)}</td>
             </tr>` : ""}
+            <tr><td colspan="2" style="padding:8px 0 0;">
+              <a href="${esc(shipment.trackingUrl)}" target="_blank" rel="noopener noreferrer"
+                 style="display:inline-block;background:#e6447f;color:#ffffff;text-decoration:none;font-size:13px;font-weight:600;padding:8px 18px;border-radius:6px;">
+                ${esc(s.trackingButton)} →
+              </a>
+            </td></tr>
           </table>
-        </td></tr>` : `
-        <tr><td style="padding:20px 32px 0;">
-          <div style="font-size:13px;color:#888;font-style:italic;">${esc(s.noTrackingNote)}</div>
         </td></tr>`;
+}
+
+function renderShippedHtml(s: typeof SHIPPED_STR[Locale], d: PrintOrderShippedEmailData): string {
+  const n = d.shipments.length;
+  const heading = n > 1 ? s.headingMulti : s.heading;
+  const intro = n > 1 ? s.introMulti.replace("{{n}}", String(n)) : s.intro;
+
+  const trackingSection = n === 0
+    ? `<tr><td style="padding:20px 32px 0;">
+         <div style="font-size:13px;color:#888;font-style:italic;">${esc(s.noTrackingNote)}</div>
+       </td></tr>`
+    : d.shipments
+        .map((sh, i) => renderShipmentBlock(s, sh, n > 1 ? s.packageOfTotal(i + 1, n) : null))
+        .join("");
 
   return `<!doctype html>
 <html><body style="margin:0;background:#f4f4f5;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
@@ -366,16 +409,17 @@ function renderShippedHtml(s: typeof SHIPPED_STR[Locale], d: PrintOrderShippedEm
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:12px;overflow:hidden;">
         <tr><td style="padding:32px 32px 8px;">
-          <div style="font-size:22px;font-weight:700;color:#1a1a1a;">${esc(s.heading)}</div>
-          <p style="font-size:14px;line-height:1.6;color:#555;margin:12px 0 0;">${esc(s.intro)}</p>
+          <div style="font-size:22px;font-weight:700;color:#1a1a1a;">${esc(heading)}</div>
+          <p style="font-size:14px;line-height:1.6;color:#555;margin:12px 0 0;">${esc(intro)}</p>
         </td></tr>
         <tr><td style="padding:16px 32px 0;">
           <div style="font-size:13px;color:#888;">${esc(s.orderLabel)}</div>
           <div style="font-size:16px;font-weight:600;color:#1a1a1a;">${esc(d.orderNumber)}</div>
         </td></tr>
-        ${trackingDetails}
+        ${trackingSection}
         <tr><td style="padding:28px 32px;" align="center">
-          <a href="${esc(ctaUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#e6447f;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:8px;">${esc(ctaLabel)}</a>
+          <a href="${esc(d.statusUrl)}" target="_blank" rel="noopener noreferrer"
+             style="font-size:13px;color:#666;text-decoration:underline;">${esc(s.statusButton)}</a>
         </td></tr>
         <tr><td style="padding:16px 32px;background:#fafafa;text-align:center;">
           <p style="font-size:12px;color:#aaa;margin:0;">${esc(s.footer)}</p>
@@ -387,23 +431,25 @@ function renderShippedHtml(s: typeof SHIPPED_STR[Locale], d: PrintOrderShippedEm
 }
 
 function renderShippedText(s: typeof SHIPPED_STR[Locale], d: PrintOrderShippedEmailData): string {
-  const lines = [
-    s.heading,
-    "",
-    s.intro,
-    "",
-    `${s.orderLabel}: ${d.orderNumber}`,
-    "",
-  ];
-  if (d.trackingUrl || d.trackingCode) {
-    lines.push(s.trackingHeading + ":");
-    if (d.carrier) lines.push(`  ${s.carrierLabel}: ${d.carrier}`);
-    if (d.trackingCode) lines.push(`  ${s.trackingCodeLabel}: ${d.trackingCode}`);
-    if (d.trackingUrl) lines.push(`  ${s.trackingButton}: ${d.trackingUrl}`);
-  } else {
+  const n = d.shipments.length;
+  const heading = n > 1 ? s.headingMulti : s.heading;
+  const intro = n > 1 ? s.introMulti.replace("{{n}}", String(n)) : s.intro;
+
+  const lines = [heading, "", intro, "", `${s.orderLabel}: ${d.orderNumber}`, ""];
+
+  if (n === 0) {
     lines.push(s.noTrackingNote);
-    lines.push(`${s.statusButton}: ${d.statusUrl}`);
+  } else {
+    d.shipments.forEach((sh, i) => {
+      lines.push(n > 1 ? `${s.packageOfTotal(i + 1, n)}:` : `${s.trackingHeading}:`);
+      if (sh.carrier) lines.push(`  ${s.carrierLabel}: ${sh.carrier}`);
+      if (sh.trackingCode) lines.push(`  ${s.trackingCodeLabel}: ${sh.trackingCode}`);
+      lines.push(`  ${s.trackingButton}: ${sh.trackingUrl}`);
+      lines.push("");
+    });
   }
+
+  lines.push(`${s.statusButton}: ${d.statusUrl}`);
   lines.push("", s.footer);
   return lines.join("\n");
 }
