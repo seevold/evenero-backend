@@ -156,7 +156,10 @@ export async function fulfillOrder(orderId: string): Promise<FulfillResult> {
       orderReferenceId: order.gelato_order_reference_id,
       customerReferenceId: order.order_number,
       currency: order.currency.toUpperCase(),
-      recipient: {
+      // Gelato v4 createOrder vil ha `shippingAddress`, IKKE `recipient`
+      // (recipient er bare for quote-endpointet). Se kommentar på
+      // GelatoCreateOrderRequest-typen for full forklaring.
+      shippingAddress: {
         firstName: addr.firstName || addr.name?.split(" ")[0] || "Customer",
         lastName: addr.lastName || addr.name?.split(" ").slice(1).join(" ") || "X",
         addressLine1: addr.line1 || addr.addressLine1 || "",

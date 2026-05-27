@@ -70,7 +70,16 @@ export interface GelatoCreateOrderRequest {
   orderReferenceId: string;            // vår idempotency-key
   customerReferenceId: string;
   currency: string;
-  recipient: GelatoRecipient;
+  /**
+   * KRITISK: Gelato v4 bruker forskjellige feltnavn for samme adresse-skjema:
+   *   - POST /v4/orders         → `shippingAddress` (denne!)
+   *   - POST /v4/orders:quote   → `recipient`
+   * Type-aliaset GelatoRecipient brukes for begge — innholdet er identisk,
+   * kun feltnavnet på request-roten varierer. Hvis du bruker `recipient` på
+   * create-order vil Gelato akseptere draft-ordre med null shippingAddress,
+   * men avvise ekte ordre med 400 "Shipping address can't be empty."
+   */
+  shippingAddress: GelatoRecipient;
   items: GelatoOrderItem[];
   shipmentMethodUid?: string;          // hvis utelatt: Gelato velger billigste normal
   metadata?: Array<{ key: string; value: string }>;
