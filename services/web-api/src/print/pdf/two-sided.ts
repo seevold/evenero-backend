@@ -34,20 +34,23 @@ export interface BuildTwoSidedInput {
 
 /**
  * Bygger en 2-page PDF med kundens design på side 1 og blank hvit bakside
- * på side 2. Page-størrelsen inkluderer bleed (trim + 2*bleedMm).
+ * på side 2.
  *
- * Bilde-plassering: strekker designet til hele bleed-area (cover). Vår
- * printCapture i frontend produserer allerede en JPG med korrekt
- * produkt-aspekt, så ingen ekstra crop-forvrengning her. Det vil si at
- * design-edge ligger PÅ trim-line — kan gi små hvite striper hvis Gelato
- * kutter litt utenfor. Akseptabelt for V1; for proper bleed bør frontend
- * legge til ekstra 3mm rundt designet før capture (TODO senere).
+ * Side-størrelse = trim-størrelse (uten bleed-extension). Vår frontend-
+ * capture produserer en JPG med trim-aspekt (90×55, 148×105 etc) uten
+ * eget bleed-område. Hvis vi her bygde en bleed-extended page (96×61) og
+ * strekte JPG-en til å fylle den, ville aspekt-mismatch (1.636 vs 1.574 for
+ * BC) stretche designet ~5% vertikalt og kappe innholdet visuelt. Cleaner
+ * å la PDF-en være trim-only — Gelato håndterer bleed via egen prosessering
+ * og evt. auto-mirror. Hvis Lasse ser hvite striper på trykket kan vi
+ * legge til mirror/blur-bleed-extension senere.
+ *
+ * bleedMm-parameteren beholdes for fremtidig bruk (bleed-extension med
+ * mirror eller blur av kantene) men ignoreres i V1.
  */
 export async function buildTwoSidedPdfFromImage(input: BuildTwoSidedInput): Promise<Buffer> {
-  const fullWmm = input.widthMm + input.bleedMm * 2;
-  const fullHmm = input.heightMm + input.bleedMm * 2;
-  const fullW = mmToPt(fullWmm);
-  const fullH = mmToPt(fullHmm);
+  const fullW = mmToPt(input.widthMm);
+  const fullH = mmToPt(input.heightMm);
 
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({
@@ -61,12 +64,10 @@ export async function buildTwoSidedPdfFromImage(input: BuildTwoSidedInput): Prom
     doc.on("error", reject);
 
     // ── Side 1: forside (design) ──────────────────────────────────────────
-    // Hvit bakgrunn først så vi har noe å falle tilbake på hvis bildet
-    // har transparens.
+    // Hvit bakgrunn først så transparente JPGer/PNGer ikke gir tomme felter.
     doc.rect(0, 0, fullW, fullH).fill("#ffffff");
-    // Strekker designet til hele bleed-area. pdfkit's image-funksjon med
-    // width+height tvinger eksakte dimensjoner uten aspect-ratio-bevaring,
-    // men siden vår JPG allerede er beskåret til riktig aspect blir det rent.
+    // JPG-en har samme aspekt som siden (trim-aspekt), så pdfkit's image
+    // med eksakt bredde/høyde gir 1:1-render uten distortion.
     doc.image(input.frontImageBuffer, 0, 0, { width: fullW, height: fullH });
 
     // ── Side 2: bakside (blank) ──────────────────────────────────────────
