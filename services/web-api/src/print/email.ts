@@ -35,6 +35,18 @@ export interface PrintOrderEmailData {
   statusUrl: string;
 }
 
+export interface PrintOrderShippedEmailData {
+  orderNumber: string;
+  customerEmail: string;
+  locale: string;
+  /** Tracking-URL fra Gelato. Hvis tom → vi viser status-side-knapp i stedet. */
+  trackingUrl?: string | null;
+  trackingCode?: string | null;
+  carrier?: string | null;
+  /** Lenke til status-siden i app-en (fallback når tracking ikke finnes). */
+  statusUrl: string;
+}
+
 // ─── Lokaliserte strenger ───────────────────────────────────────────────────
 
 const STR: Record<Locale, {
@@ -91,6 +103,75 @@ const STR: Record<Locale, {
     statusButton: "Seguir tu pedido",
     statusNote: "Puedes seguir el estado del pedido en cualquier momento con el enlace de arriba.",
     footer: "Stripe envía un recibo de pago por separado.",
+  },
+};
+
+// ─── Strenger for shipped-mail (eget sett, separat fra ordrebekreftelse) ───
+
+const SHIPPED_STR: Record<Locale, {
+  subject: string;
+  heading: string;
+  intro: string;
+  orderLabel: string;
+  trackingHeading: string;
+  carrierLabel: string;
+  trackingCodeLabel: string;
+  trackingButton: string;
+  noTrackingNote: string;
+  statusButton: string;
+  footer: string;
+}> = {
+  en: {
+    subject: "Your order is on its way",
+    heading: "Your order has shipped!",
+    intro: "Your print order has been sent from the printer and is on its way to the delivery address.",
+    orderLabel: "Order number",
+    trackingHeading: "Tracking",
+    carrierLabel: "Carrier",
+    trackingCodeLabel: "Tracking number",
+    trackingButton: "Track your shipment",
+    noTrackingNote: "Tracking information will appear here once available.",
+    statusButton: "See order status",
+    footer: "Need help? Reply to this email.",
+  },
+  nb: {
+    subject: "Bestillingen er sendt",
+    heading: "Pakken er på vei!",
+    intro: "Trykk-bestillingen din har forlatt trykkeriet og er på vei til leveringsadressen.",
+    orderLabel: "Ordrenummer",
+    trackingHeading: "Sporing",
+    carrierLabel: "Transportør",
+    trackingCodeLabel: "Sporingsnummer",
+    trackingButton: "Spor pakken",
+    noTrackingNote: "Sporings­informasjon dukker opp her så snart den er klar.",
+    statusButton: "Se ordrestatus",
+    footer: "Trenger du hjelp? Svar på denne e-posten.",
+  },
+  sv: {
+    subject: "Din beställning är på väg",
+    heading: "Paketet är på väg!",
+    intro: "Din tryckbeställning har lämnat tryckeriet och är på väg till leveransadressen.",
+    orderLabel: "Ordernummer",
+    trackingHeading: "Spårning",
+    carrierLabel: "Transportör",
+    trackingCodeLabel: "Spårningsnummer",
+    trackingButton: "Spåra paketet",
+    noTrackingNote: "Spårningsinformation dyker upp här så fort den är tillgänglig.",
+    statusButton: "Se orderstatus",
+    footer: "Behöver du hjälp? Svara på detta e-postmeddelande.",
+  },
+  es: {
+    subject: "Tu pedido está en camino",
+    heading: "¡Tu pedido ha sido enviado!",
+    intro: "Tu pedido de impresión ha salido de la imprenta y está en camino a la dirección de entrega.",
+    orderLabel: "Número de pedido",
+    trackingHeading: "Seguimiento",
+    carrierLabel: "Transportista",
+    trackingCodeLabel: "Número de seguimiento",
+    trackingButton: "Seguir el envío",
+    noTrackingNote: "La información de seguimiento aparecerá aquí cuando esté disponible.",
+    statusButton: "Ver estado del pedido",
+    footer: "¿Necesitas ayuda? Responde a este correo.",
   },
 };
 
@@ -251,5 +332,95 @@ export async function sendPrintOrderConfirmation(data: PrintOrderEmailData): Pro
     await sendViaMailgun(data.customerEmail, subject, text, html);
   } catch (err) {
     console.error("[print-email] sendPrintOrderConfirmation feilet:", (err as Error).message);
+  }
+}
+
+// ─── Shipped-mail ───────────────────────────────────────────────────────────
+
+function renderShippedHtml(s: typeof SHIPPED_STR[Locale], d: PrintOrderShippedEmailData): string {
+  const hasTracking = !!(d.trackingUrl || d.trackingCode);
+  const ctaUrl = d.trackingUrl || d.statusUrl;
+  const ctaLabel = d.trackingUrl ? s.trackingButton : s.statusButton;
+
+  const trackingDetails = hasTracking ? `
+        <tr><td style="padding:20px 32px 0;">
+          <div style="font-size:13px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.04em;">${esc(s.trackingHeading)}</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px;font-size:14px;">
+            ${d.carrier ? `<tr>
+              <td style="padding:6px 0;color:#888;width:120px;">${esc(s.carrierLabel)}</td>
+              <td style="padding:6px 0;color:#333;font-weight:500;">${esc(d.carrier)}</td>
+            </tr>` : ""}
+            ${d.trackingCode ? `<tr>
+              <td style="padding:6px 0;color:#888;">${esc(s.trackingCodeLabel)}</td>
+              <td style="padding:6px 0;color:#333;font-family:monospace;">${esc(d.trackingCode)}</td>
+            </tr>` : ""}
+          </table>
+        </td></tr>` : `
+        <tr><td style="padding:20px 32px 0;">
+          <div style="font-size:13px;color:#888;font-style:italic;">${esc(s.noTrackingNote)}</div>
+        </td></tr>`;
+
+  return `<!doctype html>
+<html><body style="margin:0;background:#f4f4f5;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:24px 0;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:12px;overflow:hidden;">
+        <tr><td style="padding:32px 32px 8px;">
+          <div style="font-size:22px;font-weight:700;color:#1a1a1a;">${esc(s.heading)}</div>
+          <p style="font-size:14px;line-height:1.6;color:#555;margin:12px 0 0;">${esc(s.intro)}</p>
+        </td></tr>
+        <tr><td style="padding:16px 32px 0;">
+          <div style="font-size:13px;color:#888;">${esc(s.orderLabel)}</div>
+          <div style="font-size:16px;font-weight:600;color:#1a1a1a;">${esc(d.orderNumber)}</div>
+        </td></tr>
+        ${trackingDetails}
+        <tr><td style="padding:28px 32px;" align="center">
+          <a href="${esc(ctaUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#e6447f;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:8px;">${esc(ctaLabel)}</a>
+        </td></tr>
+        <tr><td style="padding:16px 32px;background:#fafafa;text-align:center;">
+          <p style="font-size:12px;color:#aaa;margin:0;">${esc(s.footer)}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+}
+
+function renderShippedText(s: typeof SHIPPED_STR[Locale], d: PrintOrderShippedEmailData): string {
+  const lines = [
+    s.heading,
+    "",
+    s.intro,
+    "",
+    `${s.orderLabel}: ${d.orderNumber}`,
+    "",
+  ];
+  if (d.trackingUrl || d.trackingCode) {
+    lines.push(s.trackingHeading + ":");
+    if (d.carrier) lines.push(`  ${s.carrierLabel}: ${d.carrier}`);
+    if (d.trackingCode) lines.push(`  ${s.trackingCodeLabel}: ${d.trackingCode}`);
+    if (d.trackingUrl) lines.push(`  ${s.trackingButton}: ${d.trackingUrl}`);
+  } else {
+    lines.push(s.noTrackingNote);
+    lines.push(`${s.statusButton}: ${d.statusUrl}`);
+  }
+  lines.push("", s.footer);
+  return lines.join("\n");
+}
+
+/**
+ * Sender "sendt fra trykkeri"-mail med tracking-info. Best-effort —
+ * kaster aldri. Idempotency er caller-ansvar (vi sender én gang per
+ * shipped-webhook fra Gelato; den webhook-håndteringen sjekker shipped_at).
+ */
+export async function sendPrintOrderShipped(data: PrintOrderShippedEmailData): Promise<void> {
+  try {
+    const s = SHIPPED_STR[pickLocale(data.locale)];
+    const subject = `${s.subject} — ${data.orderNumber}`;
+    const html = renderShippedHtml(s, data);
+    const text = renderShippedText(s, data);
+    await sendViaMailgun(data.customerEmail, subject, text, html);
+  } catch (err) {
+    console.error("[print-email] sendPrintOrderShipped feilet:", (err as Error).message);
   }
 }
