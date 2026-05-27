@@ -424,3 +424,113 @@ export async function sendPrintOrderShipped(data: PrintOrderShippedEmailData): P
     console.error("[print-email] sendPrintOrderShipped feilet:", (err as Error).message);
   }
 }
+
+// ─── Failure-alert til ops (Lasse) ──────────────────────────────────────────
+
+export interface FulfillmentFailureAlertData {
+  orderNumber: string;
+  customerEmail: string;
+  /** Hva som gikk galt. Trunkert ved sending hvis veldig lang. */
+  failureReason: string;
+  /** Permanent (Gelato 4xx, fil ugyldig osv) eller transient (timeout, 5xx)? */
+  isPermanent: boolean;
+  /** Antall submit-forsøk så langt. Hvis ≥ MAX_ATTEMPTS er ordren stuck. */
+  submitAttempts: number;
+  /** Lenke til status-siden så Lasse kan se hva som er bestilt. */
+  statusUrl: string;
+}
+
+/**
+ * Sender alert-mail til ops-adressen (Lasse) når en fulfillment feiler.
+ * To trigger-scenarier:
+ *   1. Permanent feil — Gelato avviser ordren med 4xx, eller print-fil
+ *      er ugyldig. Krever manuelt inngrep (rette opp, refundere, etc.).
+ *   2. Transient feil ved siste forsøk — submit_attempts ≥ MAX og ordren
+ *      sitter fast i 'paid'. Krever retry eller manuelt inngrep.
+ *
+ * Best-effort. Kaster aldri. OPS_ALERT_EMAIL må være satt — ellers
+ * bare loggføres alarmen.
+ */
+export async function sendFulfillmentFailureAlert(
+  data: FulfillmentFailureAlertData,
+): Promise<void> {
+  try {
+    const opsEmail = process.env.OPS_ALERT_EMAIL?.trim();
+    if (!opsEmail) {
+      console.warn(`[ops-alert] OPS_ALERT_EMAIL ikke satt — fulfillment-feil for ${data.orderNumber} loggføres kun`);
+      return;
+    }
+
+    const severity = data.isPermanent ? "PERMANENT" : `TRANSIENT (${data.submitAttempts} forsøk)`;
+    const subject = `🚨 Print fulfillment ${severity} — ${data.orderNumber}`;
+
+    const text = [
+      `Ordre ${data.orderNumber} har feilet i fulfillment.`,
+      "",
+      `Kunde: ${data.customerEmail}`,
+      `Type: ${severity}`,
+      `Submit-forsøk: ${data.submitAttempts}`,
+      "",
+      "Årsak:",
+      data.failureReason.slice(0, 800),
+      "",
+      `Status-side: ${data.statusUrl}`,
+      "",
+      data.isPermanent
+        ? "Krever manuelt inngrep: rette opp data eller refundere kunde."
+        : "Kan re-trigge fulfillment manuelt (admin-retry) eller la auto-retry løse det.",
+    ].join("\n");
+
+    const html = `<!doctype html>
+<html><body style="margin:0;background:#f4f4f5;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:560px;margin:24px auto;background:#fff;padding:24px;border-radius:8px;">
+    <h2 style="margin:0 0 8px;color:#dc2626;">Print fulfillment ${esc(severity)}</h2>
+    <p style="margin:0 0 16px;color:#444;">Ordre <strong>${esc(data.orderNumber)}</strong> har feilet.</p>
+    <table cellpadding="6" style="width:100%;border-collapse:collapse;font-size:14px;color:#333;">
+      <tr><td style="color:#888;width:140px;">Kunde:</td><td>${esc(data.customerEmail)}</td></tr>
+      <tr><td style="color:#888;">Type:</td><td><strong>${esc(severity)}</strong></td></tr>
+      <tr><td style="color:#888;">Submit-forsøk:</td><td>${data.submitAttempts}</td></tr>
+    </table>
+    <h3 style="margin:20px 0 6px;color:#1a1a1a;">Årsak</h3>
+    <pre style="background:#f4f4f5;padding:12px;border-radius:6px;font-size:12px;white-space:pre-wrap;word-break:break-word;color:#444;">${esc(data.failureReason.slice(0, 1200))}</pre>
+    <p style="margin:20px 0 0;color:#555;font-size:14px;">
+      ${data.isPermanent
+        ? "Krever manuelt inngrep: rette opp data eller refundere kunde."
+        : "Kan re-trigge fulfillment manuelt eller la auto-retry løse det."}
+    </p>
+    <p style="margin:16px 0 0;">
+      <a href="${esc(data.statusUrl)}" style="color:#e6447f;text-decoration:none;">→ Åpne status-side</a>
+    </p>
+  </div>
+</body></html>`;
+
+    // Send DIREKTE til ops — ikke gjennom EMAIL_WHITELIST (det er for kunde-
+    // mails i staging). Vi bygger en lokal mailgun-call for å bypasse whitelist-
+    // logikken i sendViaMailgun (som ville rerouted opsmailen i staging også).
+    const cfg = mailgunConfig();
+    if (!cfg.apiKey) {
+      console.warn(`[ops-alert] MAILGUN_API_KEY mangler — alert for ${data.orderNumber} loggføres kun`);
+      return;
+    }
+    const form = new URLSearchParams();
+    form.append("from", cfg.from);
+    form.append("to", opsEmail);
+    form.append("subject", subject);
+    form.append("text", text);
+    form.append("html", html);
+    const auth = Buffer.from(`api:${cfg.apiKey}`).toString("base64");
+    const res = await fetch(`${cfg.baseUrl}/${cfg.domain}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) {
+      console.error(`[ops-alert] Mailgun ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      return;
+    }
+    console.log(`[ops-alert] Alert sendt til ${opsEmail} for ${data.orderNumber}`);
+  } catch (err) {
+    console.error("[ops-alert] sendFulfillmentFailureAlert feilet:", (err as Error).message);
+  }
+}

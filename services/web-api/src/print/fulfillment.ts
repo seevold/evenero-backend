@@ -14,6 +14,7 @@ import { gelatoFromEnv, GelatoError } from "./gelato/client";
 import { renderToPdf } from "./pdf";
 import { buildTwoSidedPdfFromImage, pageCountForGelatoUid, GELATO_DEFAULT_BLEED_MM } from "./pdf/two-sided";
 import { uploadPrintPdf, verifyDesignUrlReachable } from "./storage";
+import { sendFulfillmentFailureAlert } from "./email";
 import type { GelatoOrderItem } from "./gelato/types";
 
 export interface FulfillResult {
@@ -253,13 +254,51 @@ export async function fulfillOrder(orderId: string): Promise<FulfillResult> {
     const isGelato = err instanceof GelatoError;
     const isPermanent = isGelato && err.status >= 400 && err.status < 500;
     const reason = (err as Error).message;
-    await pool.query(
+
+    // Inkrementert allerede ved start av forsøket (over).
+    const attemptNow = order.submit_attempts + 1;
+    const isFinalTransient = !isPermanent && attemptNow >= MAX_ATTEMPTS;
+
+    // Atomic: sett failure-status OG marker som alarmert SAMTIDIG. Returnerer
+    // hva som faktisk endret seg — så vi sender alert KUN første gang vi
+    // krysser fra "ikke-alarmert" til "alarmert" (idempotency, ingen spam).
+    const updateRes = await pool.query<{ should_alert: boolean }>(
       `UPDATE print_orders
-       SET status=$1, failure_reason=$2, updated_at=NOW()
-       WHERE id=$3`,
-      [isPermanent ? "failed" : "paid", reason.slice(0, 1000), orderId],
+       SET status=$1, failure_reason=$2, updated_at=NOW(),
+           lasse_notified_at = CASE
+             WHEN ($4::bool AND lasse_notified_at IS NULL) THEN NOW()
+             ELSE lasse_notified_at
+           END
+       WHERE id=$3
+       RETURNING (lasse_notified_at = (SELECT NOW())) AS should_alert`,
+      [
+        isPermanent ? "failed" : "paid",
+        reason.slice(0, 1000),
+        orderId,
+        isPermanent || isFinalTransient,
+      ],
     );
     console.error(`[fulfill] ✗ ${order.order_number}: ${reason}`);
+
+    // Fire alert i bakgrunnen — blokkerer ikke returnverdi.
+    if (updateRes.rows[0]?.should_alert) {
+      const appBase = (order.shipping_address as Record<string, string>)?.app_base_url
+        || ""; // app_base_url ligger i order-tabellen, ikke shipping_address — refresh nedenfor
+      // Bruk en kjapp re-query for app_base_url (samme transaksjon ikke nødvendig her)
+      const r = await pool.query<{ app_base_url: string }>(
+        `SELECT app_base_url FROM print_orders WHERE id=$1`, [orderId],
+      );
+      const base = (r.rows[0]?.app_base_url || appBase).replace(/\/$/, "");
+      sendFulfillmentFailureAlert({
+        orderNumber: order.order_number,
+        customerEmail: order.customer_email,
+        failureReason: reason,
+        isPermanent,
+        submitAttempts: attemptNow,
+        statusUrl: base ? `${base}/print/order/${order.order_number}` : "",
+      }).catch((e) => console.error(`[fulfill] alert-send feilet for ${order.order_number}:`, e));
+    }
+
     return { ok: false, reason };
   }
 }
