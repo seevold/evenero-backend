@@ -14,7 +14,7 @@ import { pool } from "../db";
 import { gelatoFromEnv, GelatoError } from "./gelato/client";
 import { priceItem, lowestUnitPriceMinor, PricingError } from "./pricing";
 import { generateOrderNumber } from "./order-number";
-import { fulfillOrder } from "./fulfillment";
+import { fulfillOrder, refreshShipmentsFromGelato } from "./fulfillment";
 import { sendPrintOrderConfirmation, sendPrintOrderShipped } from "./email";
 import { formatOrderLineLabel } from "./format";
 import { uploadPreorderDesign, validateDesignDataUrl } from "./storage";
@@ -763,6 +763,7 @@ async function handleGetOrder(req: Request, res: Response) {
             total_minor, shipping_minor, currency,
             shipping_address, shipping_method_name,
             tracking_url, tracking_code, carrier,
+            shipments,
             paid_at, submitted_at, shipped_at, delivered_at,
             failure_reason, created_at
      FROM print_orders WHERE order_number=$1`,
@@ -865,16 +866,13 @@ async function handleGelatoWebhook(req: Request, res: Response) {
       );
     } else if (status === "shipped") {
       // Idempotency: vi sender shipped-mailen KUN første gang shipped_at
-      // settes. Returnerer raden så vi vet om mailen ble trigget eller om
-      // dette er en duplikat-webhook.
+      // settes. RETURNING-flagget gir oss det atomisk.
       const shippedRes = await pool.query<{
+        id: string;
         order_number: string;
         customer_email: string;
         locale: string;
         app_base_url: string;
-        tracking_url: string | null;
-        tracking_code: string | null;
-        carrier: string | null;
         mail_should_send: boolean;
       }>(
         `WITH prev AS (
@@ -882,34 +880,29 @@ async function handleGelatoWebhook(req: Request, res: Response) {
            FROM print_orders WHERE gelato_order_reference_id=$1
          )
          UPDATE print_orders po
-         SET status='shipped', shipped_at=COALESCE(shipped_at, NOW()),
-             tracking_url=COALESCE($2, tracking_url),
-             tracking_code=COALESCE($3, tracking_code),
-             carrier=COALESCE($4, carrier),
-             updated_at=NOW()
+         SET status='shipped', shipped_at=COALESCE(shipped_at, NOW()), updated_at=NOW()
          FROM prev
          WHERE po.id = prev.id
-         RETURNING po.order_number, po.customer_email, po.locale,
-                   po.app_base_url, po.tracking_url, po.tracking_code, po.carrier,
-                   prev.was_unshipped AS mail_should_send`,
-        [orderRef, trackingUrl, trackingCode, carrier],
+         RETURNING po.id, po.order_number, po.customer_email, po.locale,
+                   po.app_base_url, prev.was_unshipped AS mail_should_send`,
+        [orderRef],
       );
       const row = shippedRes.rows[0];
       if (row?.mail_should_send) {
-        // Status-URL bygges fra app-base lagret ved checkout — dvs samme
-        // origin som kunden brukte (staging-app vs event.evenero.com).
-        // Hvis tomt (gammel rad fra før migrationen) fall tilbake til
-        // tracking-URL alene; ingen prod-defaults i koden.
+        // Hent FULLE shipment-data fra Gelato API (webhook-payload har ikke
+        // tracking-info — den ligger i shipment.packages[] på order-detail).
+        // Lagrer på print_orders.shipments + speiler første pakke til de
+        // gamle tracking_*-feltene for bakoverkompatibilitet.
         const appBase = (row.app_base_url || "").replace(/\/$/, "");
         const statusUrl = appBase ? `${appBase}/print/order/${row.order_number}` : "";
-        sendPrintOrderShipped({
-          orderNumber: row.order_number,
-          customerEmail: row.customer_email,
-          locale: row.locale || "en",
-          trackingUrl: row.tracking_url,
-          trackingCode: row.tracking_code,
-          carrier: row.carrier,
-          statusUrl,
+        refreshShipmentsFromGelato(row.id).then(({ shipments }) => {
+          return sendPrintOrderShipped({
+            orderNumber: row.order_number,
+            customerEmail: row.customer_email,
+            locale: row.locale || "en",
+            shipments,
+            statusUrl,
+          });
         }).catch((err) => {
           console.error(`[gelato-webhook] shipped-mail feilet for ${row.order_number}:`, err);
         });

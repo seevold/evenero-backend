@@ -57,6 +57,105 @@ interface ProductDimsRow {
 
 const MAX_ATTEMPTS = 5;
 
+/**
+ * Én pakke (shipment) fra Gelato. Vi lagrer en array av disse på
+ * print_orders.shipments — én rad pr fysisk pakke kunden får.
+ */
+export interface PrintShipment {
+  /** Gelato's package-ID (unik, brukes for idempotency på shipped-mail) */
+  packageId: string;
+  trackingCode: string;
+  trackingUrl: string;
+  carrier: string;
+  /** itemReferenceId-er som er i denne pakken (eks. ["poster_a3-...", "poster_a2-..."]) */
+  itemRefs: string[];
+  /** Vekt i gram (informativt, fra Gelato) */
+  weightGrams?: number;
+}
+
+/**
+ * Henter aktuelle pakker fra Gelato sin order-API og lagrer dem på
+ * print_orders.shipments. Trygt å kjøre flere ganger (idempotent).
+ *
+ * Returnerer hvilke pakker som er NYE siden forrige kjøring — caller kan
+ * bruke det til å sende shipped-mail kun ved første gangs deteksjon.
+ */
+export async function refreshShipmentsFromGelato(
+  orderId: string,
+): Promise<{ shipments: PrintShipment[]; newPackageIds: string[] }> {
+  const r = await pool.query<{ gelato_order_id: string | null; shipments: PrintShipment[] }>(
+    `SELECT gelato_order_id, shipments FROM print_orders WHERE id=$1`,
+    [orderId],
+  );
+  const row = r.rows[0];
+  if (!row?.gelato_order_id) {
+    return { shipments: [], newPackageIds: [] };
+  }
+  const previousIds = new Set((row.shipments || []).map((s) => s.packageId));
+
+  const gelato = gelatoFromEnv();
+  const order = await gelato.getOrder(row.gelato_order_id);
+  // Gelato's responstype er løs — vi caster til en lokal struktur for
+  // shipment.packages siden den ikke ligger i den genererte type-mapping.
+  const shipmentRaw = (order as unknown as {
+    shipment?: {
+      shipmentMethodName?: string;
+      packages?: Array<{
+        id: string;
+        trackingCode?: string;
+        trackingUrl?: string;
+        orderItemIds?: string[];
+        weight?: number;
+      }>;
+    };
+  }).shipment;
+  const carrier = shipmentRaw?.shipmentMethodName || "";
+
+  // Bygg map: Gelato item-ID → vår itemReferenceId så pakker kan beskrives med
+  // produkt-slug-prefiks i stedet for opake UUIDs.
+  const idToRef = new Map<string, string>();
+  for (const it of (order as unknown as { items: Array<{ id: string; itemReferenceId: string }> }).items || []) {
+    idToRef.set(it.id, it.itemReferenceId);
+  }
+
+  const shipments: PrintShipment[] = (shipmentRaw?.packages || [])
+    .filter((p) => p.trackingCode && p.trackingUrl)
+    .map((p) => ({
+      packageId: p.id,
+      trackingCode: p.trackingCode!,
+      trackingUrl: p.trackingUrl!,
+      carrier,
+      itemRefs: (p.orderItemIds || []).map((id) => idToRef.get(id) || id),
+      weightGrams: p.weight,
+    }));
+
+  const newPackageIds = shipments
+    .map((s) => s.packageId)
+    .filter((id) => !previousIds.has(id));
+
+  // Lagre. Speil første pakke til de gamle tracking_*-feltene for
+  // bakoverkompatibilitet (eldre kode-stier som leser dem direkte).
+  const first = shipments[0];
+  await pool.query(
+    `UPDATE print_orders
+     SET shipments = $2::jsonb,
+         tracking_url = COALESCE($3, tracking_url),
+         tracking_code = COALESCE($4, tracking_code),
+         carrier = COALESCE($5, carrier),
+         updated_at = NOW()
+     WHERE id = $1`,
+    [
+      orderId,
+      JSON.stringify(shipments),
+      first?.trackingUrl ?? null,
+      first?.trackingCode ?? null,
+      first ? first.carrier : null,
+    ],
+  );
+
+  return { shipments, newPackageIds };
+}
+
 /** Last ned en URL til Buffer, eller kast hvis fail/tom. Brukes når vi må
  *  prosessere en allerede-opplastet design (JPG → 2-page PDF wrap). */
 async function downloadBufferOrThrow(url: string, itemId: string): Promise<Buffer> {
