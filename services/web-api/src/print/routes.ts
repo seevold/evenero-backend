@@ -831,6 +831,13 @@ async function handleGelatoWebhook(req: Request, res: Response) {
   } else {
     console.warn("[gelato-webhook] GELATO_WEBHOOK_SECRET ikke satt — godtar uten verifisering");
   }
+  // DEBUG (fjernes etter diagnostikk): logg hvordan Gelato faktisk autentiserer.
+  // Forteller om token mottas via query, header eller ingen av delene.
+  console.log(`[gelato-webhook-debug] sig_valid=${signatureValid} ` +
+    `query_token_len=${(req.query.token || "").toString().length} ` +
+    `header_token_len=${(req.headers["x-webhook-token"] || "").toString().length} ` +
+    `headers=${JSON.stringify(Object.keys(req.headers))} ` +
+    `url=${req.url}`);
 
   const payload = req.body as Record<string, unknown>;
   const eventType = String(payload.event || "unknown");
