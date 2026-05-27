@@ -4,7 +4,7 @@
 // designet selv, og som standardkvalitet for QR-only-bestillinger.
 //
 // Layout: QR sentrert med valgfri tittel under. CMYK-vennlig, 300 DPI,
-// 3mm bleed på alle kanter (Gelato sin standard).
+// 4mm bleed på alle kanter (Gelato's verifiserte standard for vår katalog).
 
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
@@ -15,7 +15,8 @@ export interface QrSimpleInput {
   /** Fysisk størrelse i mm */
   widthMm: number;
   heightMm: number;
-  /** Hvor mye bleed (mm) — Gelato standard er 3mm */
+  /** Hvor mye bleed (mm) — Gelato sin verifiserte standard for vår katalog
+   *  er 4mm pr side (kort, postcards, visitkort). Default 4. */
   bleedMm?: number;
   /** Valgfri tittel under QR (event-navn, "Skann meg", osv.) */
   title?: string;
@@ -44,7 +45,7 @@ function mmToPt(mm: number): number {
  * Returnerer en Buffer som kan lastes til GCS direkte.
  */
 export async function renderQrSimple(input: QrSimpleInput): Promise<Buffer> {
-  const bleed = input.bleedMm ?? 3;
+  const bleed = input.bleedMm ?? 4;
   const fullWidthMm = input.widthMm + bleed * 2;
   const fullHeightMm = input.heightMm + bleed * 2;
   const fullWidthPt = mmToPt(fullWidthMm);

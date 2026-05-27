@@ -12,7 +12,7 @@
 import { pool } from "../db";
 import { gelatoFromEnv, GelatoError } from "./gelato/client";
 import { renderToPdf } from "./pdf";
-import { buildTwoSidedPdfFromImage, pageCountForGelatoUid } from "./pdf/two-sided";
+import { buildTwoSidedPdfFromImage, pageCountForGelatoUid, GELATO_DEFAULT_BLEED_MM } from "./pdf/two-sided";
 import { uploadPrintPdf, verifyDesignUrlReachable } from "./storage";
 import type { GelatoOrderItem } from "./gelato/types";
 
@@ -126,7 +126,10 @@ export async function fulfillOrder(orderId: string): Promise<FulfillResult> {
     for (const it of items.rows) {
       let pdfUrl = it.print_file_url;
       const metadata = it.metadata || {};
-      const bleedMm = (metadata.bleedMm as number) ?? 3;
+      // Gelato's standard for vår katalog er 4mm bleed (verifisert mot
+      // deres avvisnings-mail). Per-produkt override via metadata.bleedMm
+      // hvis en produkt-variant senere har annet krav.
+      const bleedMm = (metadata.bleedMm as number) ?? GELATO_DEFAULT_BLEED_MM;
       // Antall sider Gelato krever — fra cl_X-Y i productUid. Sender vi
       // feil antall får vi "Product requires exactly N pages" og ordren
       // går aldri til print.
