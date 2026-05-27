@@ -15,7 +15,8 @@ import { gelatoFromEnv, GelatoError } from "./gelato/client";
 import { priceItem, lowestUnitPriceMinor, PricingError } from "./pricing";
 import { generateOrderNumber } from "./order-number";
 import { fulfillOrder } from "./fulfillment";
-import { sendPrintOrderConfirmation } from "./email";
+import { sendPrintOrderConfirmation, sendPrintOrderShipped } from "./email";
+import { formatOrderLineLabel } from "./format";
 import { uploadPreorderDesign, validateDesignDataUrl } from "./storage";
 import type { PrintProduct, PrintCategory, PrintAddon, PrintQtyVariant } from "@shared/schema";
 
@@ -569,8 +570,9 @@ async function handleCheckout(req: Request, res: Response) {
       `INSERT INTO print_orders
         (id, order_number, customer_email, status,
          gelato_order_reference_id, total_minor, shipping_minor, currency,
-         shipping_address, shipping_method_uid, shipping_method_name)
-       VALUES ($1,$2,$3,'pending',$4,$5,$6,'nok',$7::jsonb,$8,$9)`,
+         shipping_address, shipping_method_uid, shipping_method_name,
+         locale, app_base_url)
+       VALUES ($1,$2,$3,'pending',$4,$5,$6,'nok',$7::jsonb,$8,$9,$10,$11)`,
       [
         orderId, orderNumber, body.customerEmail, gelatoRef,
         totalMinor, shippingMinor,
@@ -583,6 +585,8 @@ async function handleCheckout(req: Request, res: Response) {
           country: body.shipping.country, phone: body.shipping.phone,
         }),
         shippingMethodUid, shippingMethodName,
+        body.locale || "en",
+        body.returnBaseUrl.replace(/\/$/, ""),
       ],
     );
     for (const p of pricedItems) {
@@ -625,13 +629,23 @@ async function handleCheckout(req: Request, res: Response) {
   // Stripe Checkout Session.
   // Vi setter NOK som currency — Adaptive Pricing (account-level) gjør at
   // kunden ser sin lokale valuta i checkout, men vi får oppgjør i NOK.
+  // Stripe Checkout-line-navnet ER det kunden ser i checkout-skjermen OG på
+  // Stripes egen betalingskvittering — så vi formaterer det med totalt antall
+  // stk (qty × packSize) for å unngå tvetydigheten "× 3" (pakker eller stk?).
+  const checkoutLocale = body.locale || "en";
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = pricedItems.map((p) => ({
     quantity: 1,  // line_total er allerede for hele qty
     price_data: {
       currency: "nok",
       unit_amount: p.priced.lineTotalMinor,
       product_data: {
-        name: `${(p.product.displayName as Record<string,string>)?.no || p.priced.productSlug} (${p.priced.qty} stk)`,
+        name: formatOrderLineLabel({
+          displayName: p.product.displayName as Record<string, string>,
+          packSize: (p.product as unknown as { packSize: number }).packSize || 1,
+          qty: p.priced.qty,
+          locale: checkoutLocale,
+          fallback: p.priced.productSlug,
+        }),
         metadata: { print_product_slug: p.priced.productSlug, qty: String(p.priced.qty) },
       },
     },
@@ -757,7 +771,8 @@ async function handleGetOrder(req: Request, res: Response) {
   if (!order.rows[0]) return res.status(404).json({ error: "NOT_FOUND" });
   const items = await pool.query(
     `SELECT oi.product_slug, oi.quantity, oi.unit_price_minor, oi.line_total_minor,
-            p.display_name AS "displayName"
+            p.display_name AS "displayName",
+            COALESCE(p.pack_size, 1) AS "packSize"
      FROM print_order_items oi
      LEFT JOIN print_products p ON p.slug = oi.product_slug
      WHERE oi.order_id=$1
@@ -849,17 +864,56 @@ async function handleGelatoWebhook(req: Request, res: Response) {
         [orderRef],
       );
     } else if (status === "shipped") {
-      await pool.query(
-        `UPDATE print_orders
+      // Idempotency: vi sender shipped-mailen KUN første gang shipped_at
+      // settes. Returnerer raden så vi vet om mailen ble trigget eller om
+      // dette er en duplikat-webhook.
+      const shippedRes = await pool.query<{
+        order_number: string;
+        customer_email: string;
+        locale: string;
+        app_base_url: string;
+        tracking_url: string | null;
+        tracking_code: string | null;
+        carrier: string | null;
+        mail_should_send: boolean;
+      }>(
+        `WITH prev AS (
+           SELECT id, shipped_at IS NULL AS was_unshipped
+           FROM print_orders WHERE gelato_order_reference_id=$1
+         )
+         UPDATE print_orders po
          SET status='shipped', shipped_at=COALESCE(shipped_at, NOW()),
              tracking_url=COALESCE($2, tracking_url),
              tracking_code=COALESCE($3, tracking_code),
              carrier=COALESCE($4, carrier),
              updated_at=NOW()
-         WHERE gelato_order_reference_id=$1`,
+         FROM prev
+         WHERE po.id = prev.id
+         RETURNING po.order_number, po.customer_email, po.locale,
+                   po.app_base_url, po.tracking_url, po.tracking_code, po.carrier,
+                   prev.was_unshipped AS mail_should_send`,
         [orderRef, trackingUrl, trackingCode, carrier],
       );
-      // TODO: trigger "shipped" e-post til kunden
+      const row = shippedRes.rows[0];
+      if (row?.mail_should_send) {
+        // Status-URL bygges fra app-base lagret ved checkout — dvs samme
+        // origin som kunden brukte (staging-app vs event.evenero.com).
+        // Hvis tomt (gammel rad fra før migrationen) fall tilbake til
+        // tracking-URL alene; ingen prod-defaults i koden.
+        const appBase = (row.app_base_url || "").replace(/\/$/, "");
+        const statusUrl = appBase ? `${appBase}/print/order/${row.order_number}` : "";
+        sendPrintOrderShipped({
+          orderNumber: row.order_number,
+          customerEmail: row.customer_email,
+          locale: row.locale || "en",
+          trackingUrl: row.tracking_url,
+          trackingCode: row.tracking_code,
+          carrier: row.carrier,
+          statusUrl,
+        }).catch((err) => {
+          console.error(`[gelato-webhook] shipped-mail feilet for ${row.order_number}:`, err);
+        });
+      }
     } else if (status === "delivered") {
       await pool.query(
         `UPDATE print_orders SET status='delivered', delivered_at=NOW(), updated_at=NOW()
@@ -933,16 +987,20 @@ async function sendPrintOrderConfirmationFor(
   session: Stripe.Checkout.Session,
 ): Promise<void> {
   const o = await pool.query(
-    `SELECT order_number, customer_email, total_minor, shipping_minor, shipping_address
+    `SELECT order_number, customer_email, shipping_address
      FROM print_orders WHERE id=$1`,
     [printOrderId],
   );
   const row = o.rows[0];
   if (!row) return;
 
+  // Ordrelinjer m/ pack_size så vi kan vise totalt antall stk.
+  // Priser hentes ikke — bekreftelse-mailen har ingen beløp; Stripe sender
+  // egen detaljert kvittering med betalingsinfo.
   const its = await pool.query(
-    `SELECT oi.quantity, oi.line_total_minor, oi.product_slug,
-            p.display_name AS "displayName"
+    `SELECT oi.quantity, oi.product_slug,
+            p.display_name AS "displayName",
+            COALESCE(p.pack_size, 1) AS "packSize"
      FROM print_order_items oi
      LEFT JOIN print_products p ON p.slug = oi.product_slug
      WHERE oi.order_id=$1 ORDER BY oi.created_at`,
@@ -950,11 +1008,6 @@ async function sendPrintOrderConfirmationFor(
   );
 
   const locale = session.metadata?.locale || "en";
-  const localeKey = locale.toLowerCase().startsWith("nb") || locale.toLowerCase().startsWith("no")
-    ? "no" : locale.slice(0, 2);
-  const pickName = (dn: Record<string, string> | null, fallback: string) =>
-    (dn && (dn[localeKey] || dn.no || dn.en || Object.values(dn)[0])) || fallback;
-
   const appBase = (session.metadata?.app_base_url || "").replace(/\/$/, "");
   const addr = (row.shipping_address || {}) as Record<string, string>;
 
@@ -963,12 +1016,15 @@ async function sendPrintOrderConfirmationFor(
     customerEmail: row.customer_email,
     locale,
     items: its.rows.map((r) => ({
-      name: pickName(r.displayName, r.product_slug),
-      quantity: r.quantity,
-      lineTotalMinor: r.line_total_minor,
+      // Ferdig-formattert etikett, ikke bare navnet: "Flyer A6 — 30 stk (3 pakker à 10)"
+      label: formatOrderLineLabel({
+        displayName: r.displayName,
+        packSize: r.packSize,
+        qty: r.quantity,
+        locale,
+        fallback: r.product_slug,
+      }),
     })),
-    shippingMinor: row.shipping_minor,
-    totalMinor: row.total_minor,
     shipping: {
       name: addr.name || "",
       line1: addr.line1 || "",
