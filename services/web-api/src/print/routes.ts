@@ -831,14 +831,6 @@ async function handleGelatoWebhook(req: Request, res: Response) {
   } else {
     console.warn("[gelato-webhook] GELATO_WEBHOOK_SECRET ikke satt — godtar uten verifisering");
   }
-  // DEBUG (fjernes etter diagnostikk): logg hvordan Gelato faktisk autentiserer.
-  const provHex = Buffer.from(provided).toString("hex");
-  const secrHex = secret ? Buffer.from(secret).toString("hex") : "(no-secret)";
-  console.log(`[gelato-webhook-debug] sig_valid=${signatureValid} ` +
-    `provided_len=${provided.length} secret_len=${(secret || "").length} ` +
-    `provided_hex=${provHex} secret_hex=${secrHex} ` +
-    `equal_string=${provided === secret} ` +
-    `url=${req.url}`);
 
   const payload = req.body as Record<string, unknown>;
   const eventType = String(payload.event || "unknown");
