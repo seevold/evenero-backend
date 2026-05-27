@@ -139,7 +139,7 @@ export async function uploadPreorderDesign(
   return { url, bucketPath };
 }
 
-/** Sjekk at en URL faktisk peker på en hentbar, gyldig bilde-fil.
+/** Sjekk at en URL faktisk peker på en hentbar, gyldig print-fil (PDF/PNG/JPEG).
  *  Brukes som pre-Gelato-vakt — vi sender aldri en død/tom URL til print. */
 export async function verifyDesignUrlReachable(url: string): Promise<boolean> {
   try {
@@ -150,9 +150,14 @@ export async function verifyDesignUrlReachable(url: string): Promise<boolean> {
     if (!res.ok) return false;
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length < 5_000) return false;
+    // Magic-bytes per format:
+    //   PNG:  89 50 4E 47
+    //   JPEG: FF D8 FF
+    //   PDF:  25 50 44 46  ("%PDF")
     const isPng = buf[0] === 0x89 && buf[1] === 0x50;
     const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
-    return isPng || isJpeg;
+    const isPdf = buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
+    return isPng || isJpeg || isPdf;
   } catch {
     return false;
   }

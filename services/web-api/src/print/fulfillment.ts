@@ -12,6 +12,7 @@
 import { pool } from "../db";
 import { gelatoFromEnv, GelatoError } from "./gelato/client";
 import { renderToPdf } from "./pdf";
+import { buildTwoSidedPdfFromImage, pageCountForGelatoUid } from "./pdf/two-sided";
 import { uploadPrintPdf, verifyDesignUrlReachable } from "./storage";
 import type { GelatoOrderItem } from "./gelato/types";
 
@@ -54,6 +55,32 @@ interface ProductDimsRow {
 }
 
 const MAX_ATTEMPTS = 5;
+
+/** Last ned en URL til Buffer, eller kast hvis fail/tom. Brukes når vi må
+ *  prosessere en allerede-opplastet design (JPG → 2-page PDF wrap). */
+async function downloadBufferOrThrow(url: string, itemId: string): Promise<Buffer> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 30_000);
+  try {
+    const res = await fetch(url, { method: "GET", signal: ctrl.signal });
+    if (!res.ok) {
+      throw new GelatoError(
+        `Kunne ikke laste ned design for item ${itemId}: HTTP ${res.status}`,
+        422,
+      );
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 5_000) {
+      throw new GelatoError(
+        `Design for item ${itemId} er mistenkelig liten (${buf.length} bytes)`,
+        422,
+      );
+    }
+    return buf;
+  } finally {
+    clearTimeout(t);
+  }
+}
 
 export async function fulfillOrder(orderId: string): Promise<FulfillResult> {
   const orderRes = await pool.query<OrderRow>(
@@ -98,17 +125,24 @@ export async function fulfillOrder(orderId: string): Promise<FulfillResult> {
     const gelatoItems: GelatoOrderItem[] = [];
     for (const it of items.rows) {
       let pdfUrl = it.print_file_url;
+      const metadata = it.metadata || {};
+      const bleedMm = (metadata.bleedMm as number) ?? 3;
+      // Antall sider Gelato krever — fra cl_X-Y i productUid. Sender vi
+      // feil antall får vi "Product requires exactly N pages" og ordren
+      // går aldri til print.
+      const requiredPages = pageCountForGelatoUid(it.gelato_product_uid);
+
       if (!pdfUrl) {
         // Bygg payload til renderer. v1: QR-URL bygges fra event-ID hvis
         // sourceEventId finnes, ellers fra Evenero forside (fallback).
         const qrUrl = it.source_event_id
           ? `https://event.evenero.com/${it.source_event_id}`
           : `https://evenero.com`;
-        const metadata = it.metadata || {};
         const pdfBuffer = await renderToPdf(it.pdf_renderer, {
           widthMm: it.width_mm,
           heightMm: it.height_mm,
-          bleedMm: (metadata.bleedMm as number) ?? 3,
+          bleedMm,
+          pages: requiredPages,
           payload: {
             qrUrl,
             // Tittel utelates på minimal-template — kan utvides når kunden
@@ -123,9 +157,33 @@ export async function fulfillOrder(orderId: string): Promise<FulfillResult> {
            WHERE id=$2`,
           [pdfUrl, it.id],
         );
+      } else if (requiredPages === 2) {
+        // Brukerens design ligger som JPG (eller PNG) fra "Tilpass og bestill".
+        // Dobbeltsidige produkter trenger en 2-page PDF — last ned bildet,
+        // wrap det som side 1 og legg en blank bakside som side 2.
+        // Idempotent: detekteres på at filen ender på .pdf (allerede wrapped).
+        const isAlreadyPdf = pdfUrl.split("?")[0].toLowerCase().endsWith(".pdf");
+        if (!isAlreadyPdf) {
+          const imgBuf = await downloadBufferOrThrow(pdfUrl, it.id);
+          const pdfBuffer = await buildTwoSidedPdfFromImage({
+            frontImageBuffer: imgBuf,
+            widthMm: it.width_mm,
+            heightMm: it.height_mm,
+            bleedMm,
+          });
+          const uploaded = await uploadPrintPdf(orderId, `${it.id}-2sided`, pdfBuffer);
+          pdfUrl = uploaded.url;
+          await pool.query(
+            `UPDATE print_order_items
+             SET print_file_url=$1, print_file_generated_at=NOW()
+             WHERE id=$2`,
+            [pdfUrl, it.id],
+          );
+        }
       }
+
       // Pre-Gelato-vakt: verifiser at print-fila faktisk er hentbar + et
-      // gyldig bilde FØR vi sender til trykk. Hindrer at en død URL eller
+      // gyldig dokument FØR vi sender til trykk. Hindrer at en død URL eller
       // tom fil ender opp som en trykket tom plakat.
       const reachable = await verifyDesignUrlReachable(pdfUrl);
       if (!reachable) {

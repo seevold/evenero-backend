@@ -25,6 +25,9 @@ export interface QrSimpleInput {
   qrColor?: string;
   /** Tekstfarge (hex), default svart */
   textColor?: string;
+  /** Antall sider PDF skal ha (1 for cl_4-0, 2 for cl_4-4-produkter).
+   *  Default 1. Bakside er alltid blank hvit. */
+  pages?: 1 | 2;
 }
 
 // Konverterings-konstanter
@@ -95,6 +98,13 @@ export async function renderQrSimple(input: QrSimpleInput): Promise<Buffer> {
         width: fullWidthPt,
         align: "center",
       });
+    }
+
+    // For dobbeltsidige produkter: legg på en blank hvit bakside.
+    // Gelato validerer page-count mot produkt-spec; vi må matche eksakt.
+    if (input.pages === 2) {
+      doc.addPage({ size: [fullWidthPt, fullHeightPt], margin: 0 });
+      doc.rect(0, 0, fullWidthPt, fullHeightPt).fill(bg);
     }
 
     doc.end();

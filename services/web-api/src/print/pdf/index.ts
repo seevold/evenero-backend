@@ -13,6 +13,9 @@ export interface RenderInput {
   widthMm: number;
   heightMm: number;
   bleedMm?: number;
+  /** Antall sider PDF skal ha. Setter Gelato side-validering;
+   *  ensidige produkter (cl_4-0) = 1, dobbeltsidige (cl_4-4) = 2. */
+  pages?: 1 | 2;
   /** Renderer-spesifikk input */
   payload: Record<string, unknown>;
 }
@@ -31,6 +34,7 @@ const qrSimpleAdapter: RenderFn = async (input) => {
       ? String(input.payload.backgroundColor) : undefined,
     qrColor: input.payload.qrColor ? String(input.payload.qrColor) : undefined,
     textColor: input.payload.textColor ? String(input.payload.textColor) : undefined,
+    pages: input.pages,
   };
   if (!qrInput.qrUrl) throw new Error("qr-simple: payload.qrUrl mangler");
   return renderQrSimple(qrInput);
