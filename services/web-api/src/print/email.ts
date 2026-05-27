@@ -2,8 +2,10 @@
 //
 // Holdt bevisst isolert fra resten av appen: print-funksjonen ligger
 // separat i web-api og skal kunne skrus av/på uten å berøre annet.
-// Stripe sender sin egen betalingskvittering automatisk; dette er en
-// ordrebekreftelse med ordredetaljer + lenke til status-siden.
+//
+// Bevisst design: denne mailen viser KUN hva som er bestilt + leveringsadresse.
+// Ingen priser, ingen fraktkost, ingen totalsum. Stripe sender sin egen
+// detaljerte betalingskvittering — vi dupliserer ikke beløp her.
 //
 // Env (web-api): MAILGUN_API_KEY (påkrevd for faktisk sending),
 // MAILGUN_DOMAIN, MAILGUN_API_BASE, MAILGUN_FROM, MAILGUN_FROM_NAME,
@@ -13,9 +15,8 @@
 type Locale = "en" | "nb" | "sv" | "es";
 
 export interface PrintOrderEmailItem {
-  name: string;
-  quantity: number;
-  lineTotalMinor: number;
+  /** Ferdig-formattert etikett, f.eks. "Flyer A6 — 30 stk (3 pakker à 10)" */
+  label: string;
 }
 
 export interface PrintOrderEmailData {
@@ -23,8 +24,6 @@ export interface PrintOrderEmailData {
   customerEmail: string;
   locale: string;
   items: PrintOrderEmailItem[];
-  shippingMinor: number;
-  totalMinor: number;
   shipping: {
     name: string;
     line1: string;
@@ -45,10 +44,6 @@ const STR: Record<Locale, {
   orderLabel: string;
   itemsHeading: string;
   shippingHeading: string;
-  deliveryLabel: string;
-  deliveryFree: string;
-  totalLabel: string;
-  taxNote: string;
   statusButton: string;
   statusNote: string;
   footer: string;
@@ -60,10 +55,6 @@ const STR: Record<Locale, {
     orderLabel: "Order number",
     itemsHeading: "Your order",
     shippingHeading: "Shipping address",
-    deliveryLabel: "Delivery",
-    deliveryFree: "Included",
-    totalLabel: "Total",
-    taxNote: "Shipping and VAT included.",
     statusButton: "Track your order",
     statusNote: "You can follow your order status any time with the link above.",
     footer: "A separate payment receipt is sent by Stripe.",
@@ -75,10 +66,6 @@ const STR: Record<Locale, {
     orderLabel: "Ordrenummer",
     itemsHeading: "Din bestilling",
     shippingHeading: "Leveringsadresse",
-    deliveryLabel: "Levering",
-    deliveryFree: "Inkludert",
-    totalLabel: "Totalt",
-    taxNote: "Frakt og mva. inkludert.",
     statusButton: "Følg bestillingen din",
     statusNote: "Du kan følge ordrestatusen når som helst med lenken over.",
     footer: "Egen betalingskvittering sendes av Stripe.",
@@ -90,10 +77,6 @@ const STR: Record<Locale, {
     orderLabel: "Ordernummer",
     itemsHeading: "Din beställning",
     shippingHeading: "Leveransadress",
-    deliveryLabel: "Leverans",
-    deliveryFree: "Ingår",
-    totalLabel: "Totalt",
-    taxNote: "Frakt och moms ingår.",
     statusButton: "Följ din beställning",
     statusNote: "Du kan följa orderstatusen när som helst med länken ovan.",
     footer: "Ett separat betalningskvitto skickas av Stripe.",
@@ -105,10 +88,6 @@ const STR: Record<Locale, {
     orderLabel: "Número de pedido",
     itemsHeading: "Tu pedido",
     shippingHeading: "Dirección de envío",
-    deliveryLabel: "Entrega",
-    deliveryFree: "Incluido",
-    totalLabel: "Total",
-    taxNote: "Envío e IVA incluidos.",
     statusButton: "Seguir tu pedido",
     statusNote: "Puedes seguir el estado del pedido en cualquier momento con el enlace de arriba.",
     footer: "Stripe envía un recibo de pago por separado.",
@@ -121,10 +100,6 @@ function pickLocale(raw: string): Locale {
   if (l === "sv") return "sv";
   if (l === "es") return "es";
   return "en";
-}
-
-function kr(minor: number): string {
-  return `${Math.round(minor / 100).toLocaleString("nb-NO")} kr`;
 }
 
 function esc(s: string): string {
@@ -193,10 +168,7 @@ function renderHtml(s: typeof STR[Locale], d: PrintOrderEmailData): string {
   const itemRows = d.items.map((it) => `
     <tr>
       <td style="padding:8px 0;border-bottom:1px solid #eee;color:#333;">
-        ${esc(it.name)} <span style="color:#999;">× ${it.quantity}</span>
-      </td>
-      <td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right;color:#333;white-space:nowrap;">
-        ${kr(it.lineTotalMinor)}
+        ${esc(it.label)}
       </td>
     </tr>`).join("");
 
@@ -218,16 +190,7 @@ function renderHtml(s: typeof STR[Locale], d: PrintOrderEmailData): string {
           <div style="font-size:13px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.04em;">${esc(s.itemsHeading)}</div>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px;font-size:14px;">
             ${itemRows}
-            <tr>
-              <td style="padding:8px 0;color:#555;">${esc(s.deliveryLabel)}</td>
-              <td style="padding:8px 0;text-align:right;color:#555;">${d.shippingMinor > 0 ? kr(d.shippingMinor) : esc(s.deliveryFree)}</td>
-            </tr>
-            <tr>
-              <td style="padding:10px 0 0;font-weight:700;color:#1a1a1a;font-size:16px;">${esc(s.totalLabel)}</td>
-              <td style="padding:10px 0 0;text-align:right;font-weight:700;color:#1a1a1a;font-size:16px;">${kr(d.totalMinor)}</td>
-            </tr>
           </table>
-          <div style="font-size:12px;color:#999;margin-top:6px;">${esc(s.taxNote)}</div>
         </td></tr>
         <tr><td style="padding:20px 32px 0;">
           <div style="font-size:13px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.04em;">${esc(s.shippingHeading)}</div>
@@ -261,10 +224,7 @@ function renderText(s: typeof STR[Locale], d: PrintOrderEmailData): string {
     `${s.orderLabel}: ${d.orderNumber}`,
     "",
     s.itemsHeading + ":",
-    ...d.items.map((it) => `  ${it.name} × ${it.quantity}  —  ${kr(it.lineTotalMinor)}`),
-    `  ${s.deliveryLabel}: ${d.shippingMinor > 0 ? kr(d.shippingMinor) : s.deliveryFree}`,
-    `  ${s.totalLabel}: ${kr(d.totalMinor)}`,
-    s.taxNote,
+    ...d.items.map((it) => `  ${it.label}`),
     "",
     `${s.shippingHeading}:`,
     `  ${d.shipping.name}`,

@@ -16,6 +16,7 @@ import { priceItem, lowestUnitPriceMinor, PricingError } from "./pricing";
 import { generateOrderNumber } from "./order-number";
 import { fulfillOrder } from "./fulfillment";
 import { sendPrintOrderConfirmation } from "./email";
+import { formatOrderLineLabel } from "./format";
 import { uploadPreorderDesign, validateDesignDataUrl } from "./storage";
 import type { PrintProduct, PrintCategory, PrintAddon, PrintQtyVariant } from "@shared/schema";
 
@@ -625,13 +626,23 @@ async function handleCheckout(req: Request, res: Response) {
   // Stripe Checkout Session.
   // Vi setter NOK som currency — Adaptive Pricing (account-level) gjør at
   // kunden ser sin lokale valuta i checkout, men vi får oppgjør i NOK.
+  // Stripe Checkout-line-navnet ER det kunden ser i checkout-skjermen OG på
+  // Stripes egen betalingskvittering — så vi formaterer det med totalt antall
+  // stk (qty × packSize) for å unngå tvetydigheten "× 3" (pakker eller stk?).
+  const checkoutLocale = body.locale || "en";
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = pricedItems.map((p) => ({
     quantity: 1,  // line_total er allerede for hele qty
     price_data: {
       currency: "nok",
       unit_amount: p.priced.lineTotalMinor,
       product_data: {
-        name: `${(p.product.displayName as Record<string,string>)?.no || p.priced.productSlug} (${p.priced.qty} stk)`,
+        name: formatOrderLineLabel({
+          displayName: p.product.displayName as Record<string, string>,
+          packSize: (p.product as unknown as { packSize: number }).packSize || 1,
+          qty: p.priced.qty,
+          locale: checkoutLocale,
+          fallback: p.priced.productSlug,
+        }),
         metadata: { print_product_slug: p.priced.productSlug, qty: String(p.priced.qty) },
       },
     },
@@ -757,7 +768,8 @@ async function handleGetOrder(req: Request, res: Response) {
   if (!order.rows[0]) return res.status(404).json({ error: "NOT_FOUND" });
   const items = await pool.query(
     `SELECT oi.product_slug, oi.quantity, oi.unit_price_minor, oi.line_total_minor,
-            p.display_name AS "displayName"
+            p.display_name AS "displayName",
+            COALESCE(p.pack_size, 1) AS "packSize"
      FROM print_order_items oi
      LEFT JOIN print_products p ON p.slug = oi.product_slug
      WHERE oi.order_id=$1
@@ -933,16 +945,20 @@ async function sendPrintOrderConfirmationFor(
   session: Stripe.Checkout.Session,
 ): Promise<void> {
   const o = await pool.query(
-    `SELECT order_number, customer_email, total_minor, shipping_minor, shipping_address
+    `SELECT order_number, customer_email, shipping_address
      FROM print_orders WHERE id=$1`,
     [printOrderId],
   );
   const row = o.rows[0];
   if (!row) return;
 
+  // Ordrelinjer m/ pack_size så vi kan vise totalt antall stk.
+  // Priser hentes ikke — bekreftelse-mailen har ingen beløp; Stripe sender
+  // egen detaljert kvittering med betalingsinfo.
   const its = await pool.query(
-    `SELECT oi.quantity, oi.line_total_minor, oi.product_slug,
-            p.display_name AS "displayName"
+    `SELECT oi.quantity, oi.product_slug,
+            p.display_name AS "displayName",
+            COALESCE(p.pack_size, 1) AS "packSize"
      FROM print_order_items oi
      LEFT JOIN print_products p ON p.slug = oi.product_slug
      WHERE oi.order_id=$1 ORDER BY oi.created_at`,
@@ -950,11 +966,6 @@ async function sendPrintOrderConfirmationFor(
   );
 
   const locale = session.metadata?.locale || "en";
-  const localeKey = locale.toLowerCase().startsWith("nb") || locale.toLowerCase().startsWith("no")
-    ? "no" : locale.slice(0, 2);
-  const pickName = (dn: Record<string, string> | null, fallback: string) =>
-    (dn && (dn[localeKey] || dn.no || dn.en || Object.values(dn)[0])) || fallback;
-
   const appBase = (session.metadata?.app_base_url || "").replace(/\/$/, "");
   const addr = (row.shipping_address || {}) as Record<string, string>;
 
@@ -963,12 +974,15 @@ async function sendPrintOrderConfirmationFor(
     customerEmail: row.customer_email,
     locale,
     items: its.rows.map((r) => ({
-      name: pickName(r.displayName, r.product_slug),
-      quantity: r.quantity,
-      lineTotalMinor: r.line_total_minor,
+      // Ferdig-formattert etikett, ikke bare navnet: "Flyer A6 — 30 stk (3 pakker à 10)"
+      label: formatOrderLineLabel({
+        displayName: r.displayName,
+        packSize: r.packSize,
+        qty: r.quantity,
+        locale,
+        fallback: r.product_slug,
+      }),
     })),
-    shippingMinor: row.shipping_minor,
-    totalMinor: row.total_minor,
     shipping: {
       name: addr.name || "",
       line1: addr.line1 || "",
