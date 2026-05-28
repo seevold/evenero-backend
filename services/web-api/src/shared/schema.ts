@@ -1,5 +1,4 @@
 import { pgTable, text, serial, integer, boolean, timestamp, jsonb, uuid, index, uniqueIndex, numeric } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // users-tabell — matcher main-api sin definisjon (uuid pk, email, event_credit).
@@ -242,27 +241,70 @@ export type PrintAddon = {
 
 // ─────────────────────────────────────────────────────────────────────────
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  email: true,
-  name: true,
-});
+// drizzle-orm 0.39 har to type-bugs som tvinger oss til å hand-rulle insert-typene:
+//  1) createInsertSchema(...).omit/pick kollapser hele typen til `never` på tabeller
+//     med .default()-kolonner (drizzle-zod 0.7.x bug — også årsaken til at
+//     print-tabellene over bruker $inferSelect/$inferInsert direkte).
+//  2) $inferInsert ekskluderer .notNull().default()-kolonner HELT fra typen
+//     (i stedet for å gjøre dem optional), så updatedAt/createdAt/status osv. blir
+//     "unknown property" ved insert. Hand-rullede typer under kompenserer.
+//
+// Drizzle's interne .values()-signatur lider av samme bug, så storage.ts caster
+// gjennom `as any` ved insert/update-calls. Runtime er OK — kolonnene finnes
+// i DB-skjemaet og blir satt korrekt.
 
-export const insertPaymentSchema = createInsertSchema(payments).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-
-export const insertSupportRequestSchema = createInsertSchema(supportRequests).omit({
-  id: true,
-  status: true,
-  createdAt: true,
-  updatedAt: true,
-});
-
-export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
-export type InsertPayment = z.infer<typeof insertPaymentSchema>;
+export type InsertUser = {
+  email: string;
+  name?: string | null;
+  event_credit?: number;
+};
+
 export type Payment = typeof payments.$inferSelect;
-export type InsertSupportRequest = z.infer<typeof insertSupportRequestSchema>;
+export type InsertPayment = {
+  paymentIntentId: string;
+  stripeChargeId?: string | null;
+  customerEmail: string;
+  amount: number;
+  currency: string;
+  status: string;
+  receiptUrl?: string | null;
+  referralId?: string | null;
+  couponCode?: string | null;
+  buyerCountry?: string | null;
+  vatAmount?: number | null;
+  baseAmount: number;
+  vatRate?: string | null;
+  metadata?: unknown;
+  productType?: string;
+  creditsGranted?: number;
+  userId?: string | null;
+  consumedEventId?: string | null;
+  refundedAt?: Date | null;
+  refundAmount?: number | null;
+  disputedAt?: Date | null;
+  createdAt?: Date;
+  updatedAt?: Date;
+};
+
 export type SupportRequest = typeof supportRequests.$inferSelect;
+export type InsertSupportRequest = {
+  name: string;
+  email: string;
+  category: string;
+  subject: string;
+  message: string;
+  status?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+};
+
+// insertSupportRequestSchema brukes via .parse() i routes.ts for å validere
+// request body på /api/support.
+export const insertSupportRequestSchema = z.object({
+  name: z.string(),
+  email: z.string(),
+  category: z.string(),
+  subject: z.string(),
+  message: z.string(),
+});

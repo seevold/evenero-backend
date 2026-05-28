@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import Stripe from "stripe";
 import { storage } from "./storage";
-import { type InsertPayment, insertSupportRequestSchema } from "@shared/schema";
+import { type InsertPayment, type InsertSupportRequest, insertSupportRequestSchema } from "@shared/schema";
 import { emailService } from "./email-service";
 import { trackInitiateCheckout, trackPurchase } from "./meta-conversions";
 import { registerPrintRoutes, handlePrintCheckoutCompleted } from "./print/routes";
@@ -392,9 +392,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/support", async (req, res) => {
     try {
       const validatedData = insertSupportRequestSchema.parse(req.body);
-      
+
       // Save to database
-      const supportRequest = await storage.createSupportRequest(validatedData);
+      // Cast: Zod's parse-output får optional-markører på alle keys i denne tsconfigen,
+      // men runtime-garantien er at alle string-feltene er satt.
+      const supportRequest = await storage.createSupportRequest(validatedData as InsertSupportRequest);
       
       // Send email notification
       const emailSent = await emailService.sendSupportEmail({

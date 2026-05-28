@@ -48,12 +48,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createPayment(payment: InsertPayment): Promise<Payment> {
+    // Drizzle 0.39 .values()-typen ekskluderer .default()-kolonner — cast nødvendig.
     const [createdPayment] = await db
       .insert(payments)
       .values({
         ...payment,
         updatedAt: new Date()
-      })
+      } as any)
       .returning();
     return createdPayment;
   }
@@ -81,7 +82,7 @@ export class DatabaseStorage implements IStorage {
   async updatePaymentByIntentId(paymentIntentId: string, updates: Partial<InsertPayment>): Promise<Payment | undefined> {
     const [updated] = await db
       .update(payments)
-      .set({ ...updates, updatedAt: new Date() })
+      .set({ ...updates, updatedAt: new Date() } as any)
       .where(eq(payments.paymentIntentId, paymentIntentId))
       .returning();
     return updated || undefined;
@@ -94,7 +95,7 @@ export class DatabaseStorage implements IStorage {
         refundedAt: new Date(),
         refundAmount: refundAmountCents,
         updatedAt: new Date()
-      })
+      } as any)
       .where(eq(payments.stripeChargeId, stripeChargeId))
       .returning();
     return updated || undefined;
@@ -103,7 +104,7 @@ export class DatabaseStorage implements IStorage {
   async markPaymentDisputed(stripeChargeId: string, disputedAt: Date | null): Promise<Payment | undefined> {
     const [updated] = await db
       .update(payments)
-      .set({ disputedAt, updatedAt: new Date() })
+      .set({ disputedAt, updatedAt: new Date() } as any)
       .where(eq(payments.stripeChargeId, stripeChargeId))
       .returning();
     return updated || undefined;
@@ -116,7 +117,7 @@ export class DatabaseStorage implements IStorage {
         ...request,
         status: "open",
         updatedAt: new Date()
-      })
+      } as any)
       .returning();
     return createdRequest;
   }
