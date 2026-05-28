@@ -28,6 +28,9 @@ async function buildPool(): Promise<Pool> {
       ...(useIam ? {} : { password: process.env.DB_PASSWORD }),
       database: process.env.DB_NAME || "postgres",
       max: 10,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
+      idleTimeoutMillis: 60000,
     };
 
     console.log(`[DB] Connected via Cloud SQL Connector to ${process.env.CLOUD_SQL_INSTANCE} (auth=${useIam ? "IAM" : "password"}, user=${config.user})`);
@@ -47,8 +50,17 @@ async function buildPool(): Promise<Pool> {
   return new Pool({
     connectionString,
     ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10000,
+    idleTimeoutMillis: 60000,
   });
 }
 
 export const pool = await buildPool();
+// Uten denne listener vil idle-connection-feil (f.eks. Cloud SQL/GFE som lukker en
+// idle TLS-socket) bli unhandled og krashe Node-prosessen — pg fjerner den dårlige
+// clienten fra poolen automatisk uansett.
+pool.on("error", (err) => {
+  console.error("[DB] idle client error (removed from pool)", err);
+});
 export const db = drizzle(pool, { schema });
