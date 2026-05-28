@@ -112,8 +112,8 @@ export async function sendMetaEvent(eventData: EventData): Promise<boolean> {
       body: JSON.stringify(payload)
     });
     
-    const result = await response.json() as { events_received?: number; messages?: string[] };
-
+    const result = await response.json();
+    
     if (!response.ok) {
       console.error('❌ Meta Conversion API error:', {
         status: response.status,
@@ -122,7 +122,7 @@ export async function sendMetaEvent(eventData: EventData): Promise<boolean> {
       });
       return false;
     }
-
+    
     console.log(`✅ Meta Conversion API: ${eventData.eventName} sent successfully`, {
       events_received: result.events_received,
       messages: result.messages,
