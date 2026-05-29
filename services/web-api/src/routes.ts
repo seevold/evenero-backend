@@ -507,7 +507,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create Stripe Checkout Session for embedded form
   app.post("/api/create-checkout-session", async (req, res) => {
     try {
-      const { buyerCountry, customerEmail, couponCode, metaEventId, marketingConsent, fbp, fbc } = req.body;
+      const { buyerCountry, customerEmail, couponCode, metaEventId, marketingConsent, fbp, fbc, attribution } = req.body;
 
       // Prepare metadata for tracking. marketing_consent lagres alltid (true/false)
       // så webhook-en senere kan gate Meta CAPI uten å gjette.
@@ -525,6 +525,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (metaEventId) {
         metadata.meta_event_id = metaEventId;
+      }
+
+      // Kampanje-attribusjon fra evenero-web/lib/utm-storage.ts. Cookie-fritt;
+      // Stripe-metadata gir autoritativ kampanje-attribusjon for hver betalte
+      // konvertering uten å være avhengig av GA/Meta-consent. Defensiv mot
+      // klient-input: kun whitelist-ede felter, og hver verdi trimmes til
+      // Stripe-grensen (500 char/value).
+      const ATTRIBUTION_FIELDS = [
+        'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term',
+        'gclid', 'fbclid', 'landing_path', 'referrer',
+      ] as const;
+      if (attribution && typeof attribution === 'object') {
+        for (const key of ATTRIBUTION_FIELDS) {
+          const val = (attribution as Record<string, unknown>)[key];
+          if (typeof val === 'string' && val.length > 0) {
+            metadata[key] = val.slice(0, 500);
+          }
+        }
       }
       
       // Store tracking data in metadata for later use in webhook
