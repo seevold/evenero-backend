@@ -17,6 +17,7 @@ import { generateOrderNumber } from "./order-number";
 import { fulfillOrder, refreshShipmentsFromGelato, syncOrderFromGelato } from "./fulfillment";
 import { sendPrintOrderConfirmation, sendPrintOrderShipped } from "./email";
 import { formatOrderLineLabel } from "./format";
+import { verifySuperuser } from "./admin-auth";
 import { uploadPreorderDesign, validateDesignDataUrl } from "./storage";
 import type { PrintProduct, PrintCategory, PrintAddon, PrintQtyVariant } from "@shared/schema";
 
@@ -1120,6 +1121,137 @@ export function registerPrintRoutes(app: Express) {
         results,
         errors,
       });
+    } catch (e) { next(e); }
+  });
+
+  // ─── Admin (superuser) — drift av print-ordrer ────────────────────────
+  // JWT-verifisert mot delt users-tabell. admin.tsx kaller disse fra
+  // Print-fanen med Bearer <evenero_token>.
+
+  // Liste over ordrer med filter. Returnerer ikke-sensitivt sammendrag.
+  app.get("/api/print/admin/orders", async (req, res, next) => {
+    try {
+      const auth = await verifySuperuser(req);
+      if (!auth.ok) return res.status(auth.status).json({ error: "FORBIDDEN" });
+
+      const status = typeof req.query.status === "string" ? req.query.status : "";
+      const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+      const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || "50"), 10) || 50));
+
+      const where: string[] = [];
+      const params: unknown[] = [];
+      if (status && status !== "all") {
+        params.push(status);
+        where.push(`status = $${params.length}`);
+      }
+      if (search) {
+        params.push(`%${search}%`);
+        where.push(`(order_number ILIKE $${params.length} OR customer_email ILIKE $${params.length})`);
+      }
+      params.push(limit);
+      const rows = await pool.query(
+        `SELECT id, order_number, customer_email, status,
+                total_minor, currency, gelato_order_id,
+                jsonb_array_length(shipments) AS package_count,
+                failure_reason, submit_attempts,
+                created_at, paid_at, submitted_at, shipped_at, delivered_at
+         FROM print_orders
+         ${where.length ? "WHERE " + where.join(" AND ") : ""}
+         ORDER BY created_at DESC
+         LIMIT $${params.length}`,
+        params,
+      );
+
+      // Status-bøtter for filter-tellere (alltid hele tabellen, ikke filtrert).
+      const counts = await pool.query<{ status: string; n: string }>(
+        `SELECT status, COUNT(*)::text AS n FROM print_orders GROUP BY status`,
+      );
+      res.json({
+        orders: rows.rows,
+        counts: Object.fromEntries(counts.rows.map((c) => [c.status, parseInt(c.n, 10)])),
+      });
+    } catch (e) { next(e); }
+  });
+
+  // Full detalj for én ordre — items, adresse, pakker, webhook-historikk.
+  app.get("/api/print/admin/orders/:orderNumber", async (req, res, next) => {
+    try {
+      const auth = await verifySuperuser(req);
+      if (!auth.ok) return res.status(auth.status).json({ error: "FORBIDDEN" });
+
+      const ord = await pool.query(
+        `SELECT * FROM print_orders WHERE order_number = $1`,
+        [req.params.orderNumber],
+      );
+      const order = ord.rows[0];
+      if (!order) return res.status(404).json({ error: "NOT_FOUND" });
+
+      const items = await pool.query(
+        `SELECT oi.product_slug, oi.gelato_product_uid, oi.quantity,
+                oi.unit_price_minor, oi.line_total_minor, oi.design_choice,
+                oi.print_file_url, p.display_name AS "displayName",
+                COALESCE(p.pack_size, 1) AS "packSize"
+         FROM print_order_items oi
+         LEFT JOIN print_products p ON p.slug = oi.product_slug
+         WHERE oi.order_id = $1 ORDER BY oi.created_at`,
+        [order.id],
+      );
+      const events = await pool.query(
+        `SELECT event_type, signature_valid, received_at, processed_at,
+                payload->>'fulfillmentStatus' AS fulfillment_status
+         FROM print_gelato_webhook_events
+         WHERE order_reference_id = $1
+         ORDER BY received_at DESC LIMIT 30`,
+        [order.gelato_order_reference_id],
+      );
+      res.json({ order, items: items.rows, webhookEvents: events.rows });
+    } catch (e) { next(e); }
+  });
+
+  // Retry fulfillment — kjør fulfillOrder på nytt (idempotent på gelato_order_id).
+  // For ordrer som henger i 'paid' eller 'failed'.
+  app.post("/api/print/admin/orders/:orderNumber/retry", async (req, res, next) => {
+    try {
+      const auth = await verifySuperuser(req);
+      if (!auth.ok) return res.status(auth.status).json({ error: "FORBIDDEN" });
+
+      const r = await pool.query<{ id: string; status: string; submit_attempts: number }>(
+        `SELECT id, status, submit_attempts FROM print_orders WHERE order_number = $1`,
+        [req.params.orderNumber],
+      );
+      const row = r.rows[0];
+      if (!row) return res.status(404).json({ error: "NOT_FOUND" });
+      if (!["paid", "failed", "submitting"].includes(row.status)) {
+        return res.status(409).json({ error: "NOT_RETRYABLE", status: row.status });
+      }
+      // Nullstill attempt-teller ved manuell retry så MAX_ATTEMPTS-taket
+      // ikke blokkerer — admin overstyrer bevisst.
+      await pool.query(
+        `UPDATE print_orders SET submit_attempts = 0, failure_reason = NULL,
+           status = 'paid', updated_at = NOW()
+         WHERE id = $1 AND status != 'submitted'`,
+        [row.id],
+      );
+      console.log(`[print-admin] ${auth.email} retry fulfillment for ${req.params.orderNumber}`);
+      const result = await fulfillOrder(row.id);
+      res.json({ ok: result.ok, gelatoOrderId: result.gelatoOrderId, reason: result.reason });
+    } catch (e) { next(e); }
+  });
+
+  // Re-sync status + tracking fra Gelato (uten å lage ny ordre).
+  app.post("/api/print/admin/orders/:orderNumber/resync", async (req, res, next) => {
+    try {
+      const auth = await verifySuperuser(req);
+      if (!auth.ok) return res.status(auth.status).json({ error: "FORBIDDEN" });
+
+      const r = await pool.query<{ id: string }>(
+        `SELECT id FROM print_orders WHERE order_number = $1`,
+        [req.params.orderNumber],
+      );
+      if (!r.rows[0]) return res.status(404).json({ error: "NOT_FOUND" });
+      console.log(`[print-admin] ${auth.email} resync ${req.params.orderNumber}`);
+      const result = await syncOrderFromGelato(r.rows[0].id);
+      res.json(result);
     } catch (e) { next(e); }
   });
 
