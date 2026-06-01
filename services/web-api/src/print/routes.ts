@@ -1340,6 +1340,71 @@ export function registerPrintRoutes(app: Express) {
     } catch (e) { next(e); }
   });
 
+  // Stats: aggregert innsikt fra eksisterende ordre-data (read-only).
+  // Alt utledet fra print_orders + print_order_items — ingen ny sporing.
+  app.get("/api/print/admin/stats", async (req, res, next) => {
+    try {
+      const auth = await verifySuperuser(req);
+      if (!auth.ok) return res.status(auth.status).json({ error: "FORBIDDEN" });
+
+      // "Betalt+"-statuser = ordrer som faktisk konverterte (ekskluder
+      // pending/cancelled fra produkt-/omsetnings-stats).
+      const PAID = `('paid','submitting','submitted','in_production','shipped','delivered')`;
+
+      const [funnel, abandon, revenue, products, qtyDist, design, countries] = await Promise.all([
+        // Status-trakt
+        pool.query(`SELECT status, COUNT(*)::int AS n FROM print_orders GROUP BY status`),
+        // Frafall: pending (nådde betaling, fullførte ikke) vs konvertert.
+        // pending >24t = Stripe-session utløpt = sikkert forlatt.
+        pool.query(`
+          SELECT
+            COUNT(*) FILTER (WHERE status='pending')::int AS pending,
+            COUNT(*) FILTER (WHERE status='pending' AND created_at < NOW() - INTERVAL '24 hours')::int AS abandoned,
+            COUNT(*) FILTER (WHERE status NOT IN ('pending','cancelled'))::int AS converted
+          FROM print_orders`),
+        // Omsetning (betalt+)
+        pool.query(`SELECT COALESCE(SUM(total_minor),0)::int AS revenue_minor, COUNT(*)::int AS n
+                    FROM print_orders WHERE status IN ${PAID}`),
+        // Produkt-popularitet
+        pool.query(`
+          SELECT oi.product_slug,
+                 COUNT(*)::int AS line_count,
+                 SUM(oi.quantity)::int AS total_qty,
+                 SUM(oi.line_total_minor)::int AS revenue_minor
+          FROM print_order_items oi JOIN print_orders o ON o.id = oi.order_id
+          WHERE o.status IN ${PAID}
+          GROUP BY oi.product_slug ORDER BY line_count DESC`),
+        // Antall-tier-fordeling per produkt
+        pool.query(`
+          SELECT oi.product_slug, oi.quantity, COUNT(*)::int AS n
+          FROM print_order_items oi JOIN print_orders o ON o.id = oi.order_id
+          WHERE o.status IN ${PAID}
+          GROUP BY oi.product_slug, oi.quantity ORDER BY oi.product_slug, oi.quantity`),
+        // Egen design vs mal
+        pool.query(`
+          SELECT oi.design_choice, COUNT(*)::int AS n
+          FROM print_order_items oi JOIN print_orders o ON o.id = oi.order_id
+          WHERE o.status IN ${PAID}
+          GROUP BY oi.design_choice`),
+        // Land-fordeling
+        pool.query(`
+          SELECT shipping_address->>'country' AS country, COUNT(*)::int AS n
+          FROM print_orders WHERE status IN ${PAID}
+          GROUP BY 1 ORDER BY n DESC`),
+      ]);
+
+      res.json({
+        funnel: Object.fromEntries(funnel.rows.map((r) => [r.status, r.n])),
+        abandonment: abandon.rows[0],
+        revenue: revenue.rows[0],
+        products: products.rows,
+        qtyDistribution: qtyDist.rows,
+        designChoice: Object.fromEntries(design.rows.map((r) => [r.design_choice, r.n])),
+        countries: countries.rows,
+      });
+    } catch (e) { next(e); }
+  });
+
   // Internal: clear cache (kalles fra seed-script via SIGHUP eller restart).
   // Dev-bekvemmelighet — produksjon bruker bare 5min TTL.
   app.post("/api/print/_clear-cache", (_req, res) => {
