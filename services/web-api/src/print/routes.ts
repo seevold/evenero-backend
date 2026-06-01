@@ -18,6 +18,7 @@ import { fulfillOrder, refreshShipmentsFromGelato, syncOrderFromGelato } from ".
 import { sendPrintOrderConfirmation, sendPrintOrderShipped } from "./email";
 import { formatOrderLineLabel } from "./format";
 import { verifySuperuser } from "./admin-auth";
+import { getPrintSettings, updatePrintSettings } from "./settings";
 import { uploadPreorderDesign, validateDesignDataUrl } from "./storage";
 import type { PrintProduct, PrintCategory, PrintAddon, PrintQtyVariant } from "@shared/schema";
 
@@ -245,6 +246,15 @@ async function handleQuote(req: Request, res: Response) {
 
   if (!ALLOWED_COUNTRIES_V1.includes(country)) {
     return res.status(400).json({ error: "COUNTRY_NOT_SUPPORTED", country });
+  }
+
+  // Runtime-gate: tjeneste av, eller land ikke aktivert i admin.
+  const settings = await getPrintSettings();
+  if (!settings.serviceEnabled) {
+    return res.status(503).json({ error: "SERVICE_DISABLED" });
+  }
+  if (!settings.enabledCountries.includes(country)) {
+    return res.status(400).json({ error: "COUNTRY_NOT_ENABLED", country });
   }
 
   const catalog = await loadCatalog();
@@ -480,6 +490,16 @@ async function handleCheckout(req: Request, res: Response) {
   const body = parsed.data;
   if (!ALLOWED_COUNTRIES_V1.includes(body.country)) {
     return res.status(400).json({ error: "COUNTRY_NOT_SUPPORTED" });
+  }
+
+  // Runtime-gate (hard sikkerhet — her opprettes Stripe-session + senere
+  // Gelato-ordre). Avvis hvis tjenesten er av eller landet ikke er aktivert.
+  const settings = await getPrintSettings();
+  if (!settings.serviceEnabled) {
+    return res.status(503).json({ error: "SERVICE_DISABLED" });
+  }
+  if (!settings.enabledCountries.includes(body.country)) {
+    return res.status(400).json({ error: "COUNTRY_NOT_ENABLED", country: body.country });
   }
 
   const catalog = await loadCatalog();
@@ -1039,8 +1059,17 @@ export function registerPrintRoutes(app: Express) {
   app.get("/api/print/catalog", async (req, res, next) => {
     try {
       const country = (req.query.country as string)?.toUpperCase();
-      const catalog = await loadCatalog();
-      res.json(buildCatalogResponse(catalog, country));
+      const [catalog, settings] = await Promise.all([loadCatalog(), getPrintSettings()]);
+      const base = buildCatalogResponse(catalog, country);
+      // Filtrer tilgjengelige land til snittet av systemets støttede liste og
+      // de admin har aktivert. Inkluder serviceEnabled så frontend kan vise
+      // "midlertidig utilgjengelig" når tjenesten er av.
+      const enabled = new Set(settings.enabledCountries);
+      res.json({
+        ...base,
+        allowedCountries: base.allowedCountries.filter((c) => enabled.has(c)),
+        serviceEnabled: settings.serviceEnabled,
+      });
     } catch (e) { next(e); }
   });
 
@@ -1252,6 +1281,62 @@ export function registerPrintRoutes(app: Express) {
       console.log(`[print-admin] ${auth.email} resync ${req.params.orderNumber}`);
       const result = await syncOrderFromGelato(r.rows[0].id);
       res.json(result);
+    } catch (e) { next(e); }
+  });
+
+  // Settings: les gjeldende konfig + systemets fulle land-liste (så admin-UI
+  // kan vise alle togglbare land, ikke bare de aktiverte).
+  app.get("/api/print/admin/settings", async (req, res, next) => {
+    try {
+      const auth = await verifySuperuser(req);
+      if (!auth.ok) return res.status(auth.status).json({ error: "FORBIDDEN" });
+      const settings = await getPrintSettings();
+      res.json({ ...settings, supportedCountries: ALLOWED_COUNTRIES_V1 });
+    } catch (e) { next(e); }
+  });
+
+  // Settings: oppdater service av/på og/eller aktiverte land.
+  app.put("/api/print/admin/settings", async (req, res, next) => {
+    try {
+      const auth = await verifySuperuser(req);
+      if (!auth.ok) return res.status(auth.status).json({ error: "FORBIDDEN" });
+      const body = (req.body || {}) as { serviceEnabled?: boolean; enabledCountries?: string[] };
+      // Valider at land er innenfor systemets støttede liste — kan ikke
+      // aktivere et land vi ikke har SKU-mapping for.
+      if (Array.isArray(body.enabledCountries)) {
+        const invalid = body.enabledCountries
+          .map((c) => String(c).toUpperCase())
+          .filter((c) => !ALLOWED_COUNTRIES_V1.includes(c));
+        if (invalid.length) {
+          return res.status(400).json({ error: "UNSUPPORTED_COUNTRIES", invalid });
+        }
+      }
+      const updated = await updatePrintSettings(
+        { serviceEnabled: body.serviceEnabled, enabledCountries: body.enabledCountries },
+        auth.email || "unknown",
+      );
+      console.log(`[print-admin] ${auth.email} oppdaterte settings: enabled=${updated.serviceEnabled} land=${updated.enabledCountries.length}`);
+      res.json({ ...updated, supportedCountries: ALLOWED_COUNTRIES_V1 });
+    } catch (e) { next(e); }
+  });
+
+  // Pris-oversikt: produkter + qty-varianter med retail + margin (read-only).
+  app.get("/api/print/admin/products", async (req, res, next) => {
+    try {
+      const auth = await verifySuperuser(req);
+      if (!auth.ok) return res.status(auth.status).json({ error: "FORBIDDEN" });
+      const rows = await pool.query(
+        `SELECT slug, category_slug AS "categorySlug",
+                display_name AS "displayName",
+                width_mm AS "widthMm", height_mm AS "heightMm",
+                markup_target_pct AS "markupTargetPct",
+                COALESCE(pack_size, 1) AS "packSize",
+                qty_variants AS "qtyVariants",
+                allowed_countries AS "allowedCountries",
+                active, last_price_refresh_at AS "lastPriceRefreshAt"
+         FROM print_products ORDER BY category_slug, width_mm * height_mm`,
+      );
+      res.json({ products: rows.rows });
     } catch (e) { next(e); }
   });
 
