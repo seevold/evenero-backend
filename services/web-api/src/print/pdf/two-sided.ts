@@ -46,12 +46,18 @@ export interface BuildTwoSidedInput {
 }
 
 /**
- * Bygger en 2-page PDF med kundens design på side 1 og blank hvit bakside
- * på side 2.
+ * Bygger en 2-page PDF med kundens design på BEGGE sider.
  *
  * Side-størrelse = (widthMm + 2*bleedMm) × (heightMm + 2*bleedMm).
  * Bilde-plassering: cover-fit (preserve aspect, crop kanter) — sentert.
  * Hvit bakgrunn under bildet i tilfelle JPG ikke når helt ut til kantene.
+ *
+ * Begge sider får SAMME design. cl_4-4-produkter (flyers, visitkort, square
+ * kort) fakturerer for dobbeltsidig trykk uansett — så å duplisere designet
+ * på baksiden er gratis og gir et ferdigere produkt enn blank bakside.
+ * Geometrien (2 sider, samme størrelse + bleed) er identisk med den tidligere
+ * blank-bakside-versjonen som Gelato allerede har godtatt — kun pikslene på
+ * side 2 endres, og Gelato validerer geometri, ikke innhold.
  */
 export async function buildTwoSidedPdfFromImage(input: BuildTwoSidedInput): Promise<Buffer> {
   const fullW = mmToPt(input.widthMm + input.bleedMm * 2);
@@ -68,21 +74,25 @@ export async function buildTwoSidedPdfFromImage(input: BuildTwoSidedInput): Prom
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    // ── Side 1: forside (design) ──────────────────────────────────────────
-    // Hvit bakgrunn først så vi har noe å falle tilbake på hvis bildet
-    // ikke når kantene (skal ikke skje med våre templates, men sikkerhetsnett).
-    doc.rect(0, 0, fullW, fullH).fill("#ffffff");
-    // cover-fit: bevarer aspect, skalerer slik at bildet FYLLER hele
-    // bleed-arealet, kropper marginalt der aspect-diff krever det.
-    doc.image(input.frontImageBuffer, 0, 0, {
-      cover: [fullW, fullH],
-      align: "center",
-      valign: "center",
-    });
+    // Felles render-hjelper for én side — hvit bunn + cover-fit-bilde.
+    const drawSide = () => {
+      // Hvit bakgrunn først så vi har noe å falle tilbake på hvis bildet
+      // ikke når kantene (skal ikke skje med våre templates, men sikkerhetsnett).
+      doc.rect(0, 0, fullW, fullH).fill("#ffffff");
+      // cover-fit: bevarer aspect, skalerer slik at bildet FYLLER hele
+      // bleed-arealet, kropper marginalt der aspect-diff krever det.
+      doc.image(input.frontImageBuffer, 0, 0, {
+        cover: [fullW, fullH],
+        align: "center",
+        valign: "center",
+      });
+    };
 
-    // ── Side 2: bakside (blank) ──────────────────────────────────────────
+    // ── Side 1: forside ───────────────────────────────────────────────────
+    drawSide();
+    // ── Side 2: bakside (samme design) ───────────────────────────────────
     doc.addPage({ size: [fullW, fullH], margin: 0 });
-    doc.rect(0, 0, fullW, fullH).fill("#ffffff");
+    drawSide();
 
     doc.end();
   });
