@@ -12,6 +12,8 @@
 // EMAIL_WHITELIST_TO (staging: ruter all e-post til testadresse).
 // Uten MAILGUN_API_KEY logges e-posten i stedet for å sendes.
 
+import { logEmailSend, redactEmail, errorCodeForStatus } from "../email-marker";
+
 type Locale = "en" | "nb" | "sv" | "es";
 
 export interface PrintOrderEmailItem {
@@ -256,12 +258,15 @@ async function sendViaMailgun(to: string, subject: string, text: string, html: s
     });
     if (!res.ok) {
       console.error(`[print-email] Mailgun ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      logEmailSend({ ok: false, type: "print-order", to: redactEmail(actualTo), status: res.status, errorCode: errorCodeForStatus(res.status) });
       return false;
     }
     console.log(`[print-email] Sendt til ${actualTo}${isRerouted ? ` (omdirigert fra ${to})` : ""}`);
+    logEmailSend({ ok: true, type: "print-order", to: redactEmail(actualTo) });
     return true;
   } catch (err) {
     console.error("[print-email] Sending feilet:", (err as Error).message);
+    logEmailSend({ ok: false, type: "print-order", to: redactEmail(actualTo), errorCode: "timeout_or_network" });
     return false;
   }
 }
@@ -499,12 +504,12 @@ export interface FulfillmentFailureAlertData {
  */
 export async function sendFulfillmentFailureAlert(
   data: FulfillmentFailureAlertData,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const opsEmail = process.env.OPS_ALERT_EMAIL?.trim();
     if (!opsEmail) {
       console.warn(`[ops-alert] OPS_ALERT_EMAIL ikke satt — fulfillment-feil for ${data.orderNumber} loggføres kun`);
-      return;
+      return true; // alarmering deaktivert (ingen destinasjon) → ikke be om retry
     }
 
     const severity = data.isPermanent ? "PERMANENT" : `TRANSIENT (${data.submitAttempts} forsøk)`;
@@ -556,7 +561,7 @@ export async function sendFulfillmentFailureAlert(
     const cfg = mailgunConfig();
     if (!cfg.apiKey) {
       console.warn(`[ops-alert] MAILGUN_API_KEY mangler — alert for ${data.orderNumber} loggføres kun`);
-      return;
+      return true; // konfig-mangel → ikke be om retry-storm
     }
     const form = new URLSearchParams();
     form.append("from", cfg.from);
@@ -573,10 +578,15 @@ export async function sendFulfillmentFailureAlert(
     });
     if (!res.ok) {
       console.error(`[ops-alert] Mailgun ${res.status}: ${(await res.text()).slice(0, 200)}`);
-      return;
+      logEmailSend({ ok: false, type: "print-fulfill-alert", to: redactEmail(opsEmail), status: res.status, errorCode: errorCodeForStatus(res.status) });
+      return false; // transient (Mailgun) → fulfillment.ts nullstiller flagget så alarmen re-fyrer
     }
     console.log(`[ops-alert] Alert sendt til ${opsEmail} for ${data.orderNumber}`);
+    logEmailSend({ ok: true, type: "print-fulfill-alert", to: redactEmail(opsEmail) });
+    return true;
   } catch (err) {
     console.error("[ops-alert] sendFulfillmentFailureAlert feilet:", (err as Error).message);
+    logEmailSend({ ok: false, type: "print-fulfill-alert", to: redactEmail(process.env.OPS_ALERT_EMAIL?.trim() || ""), errorCode: "timeout_or_network" });
+    return false;
   }
 }

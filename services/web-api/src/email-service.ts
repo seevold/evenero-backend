@@ -1,5 +1,6 @@
 import axios from 'axios';
 import FormData from 'form-data';
+import { logEmailSend, redactEmail, errorCodeForStatus } from './email-marker';
 
 interface EmailData {
   name: string;
@@ -76,6 +77,7 @@ export class EmailService {
       );
 
       console.log('Support email sent successfully:', response.data);
+      logEmailSend({ ok: true, type: 'support-notify', to: redactEmail('post@evenero.com') });
       return true;
     } catch (error: any) {
       console.error('Failed to send support email - Full error details:');
@@ -88,7 +90,9 @@ export class EmailService {
       console.error('Using API key prefix:', this.apiKey ? this.apiKey.substring(0, 8) + '...' : 'NO KEY');
       console.error('Environment NODE_ENV:', process.env.NODE_ENV);
       console.error('Environment check - keys available:', Object.keys(process.env).filter(k => k.includes('MAILGUN')));
-      
+
+      const st = error.response?.status as number | undefined;
+      logEmailSend({ ok: false, type: 'support-notify', to: redactEmail('post@evenero.com'), status: st, errorCode: st ? errorCodeForStatus(st) : 'timeout_or_network' });
       // Return false but don't crash the application
       return false;
     }
