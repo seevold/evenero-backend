@@ -1,5 +1,6 @@
 // Admin notification for feedback (feature request / bug report).
-// English-only because the recipient is always Lasse — no user locale matters.
+// English-only because the recipient is an internal admin inbox (post@evenero.com)
+// — no user locale matters.
 // Distinct visual treatment (kept tighter, no localized footer) so it's
 // obvious in the inbox it's an internal admin email rather than a customer-
 // facing one.
@@ -18,7 +19,7 @@ export async function sendFeedbackNotificationEmail(opts: {
   submitterEmail?: string;
   id: string;
 }): Promise<boolean> {
-  const recipient = (process.env.FEEDBACK_NOTIFICATION_EMAIL || 'lasse@styretavla.no').trim();
+  const recipient = (process.env.FEEDBACK_NOTIFICATION_EMAIL || 'post@evenero.com').trim();
   const typeLabel = opts.type === 'bug' ? 'Bug report' : 'Feature request';
   const titleTrim = opts.title.length > 120 ? opts.title.slice(0, 117) + '…' : opts.title;
   const subject = `[Evenero] ${typeLabel}: ${titleTrim}`;
