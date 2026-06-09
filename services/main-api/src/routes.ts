@@ -16,6 +16,40 @@ if (!process.env.JWT_SECRET) {
 }
 const JWT_SECRET: string = process.env.JWT_SECRET;
 
+// ── Cloud Scheduler OIDC-verifisering for /process-reminders ──────────────────
+// Endepunktet er internett-naabart (Cloud Run allUsers-invoker kreves av de
+// offentlige PIN/galleri-rutene). Cloud Scheduler sender allerede et OIDC-token
+// (SA + run.app-audience); her verifiserer vi det saa kun scheduleren kan trigge
+// reminder-kjoeringer. FLAGG-GATED: uten REMINDER_OIDC_ENFORCE=true er den en ren
+// passthrough (dagens oppfoersel), saa en deploy kan ALDRI bryte reminders.
+const schedulerOidcClient = new OAuth2Client();
+async function requireSchedulerAuth(req: any, res: any, next: any) {
+  if (process.env.REMINDER_OIDC_ENFORCE !== 'true') return next();
+
+  const audience = process.env.REMINDER_OIDC_AUDIENCE;
+  const allowedSa = process.env.REMINDER_OIDC_SA;
+  if (!audience || !allowedSa) {
+    console.error('[SCHEDULER-AUTH] REMINDER_OIDC_ENFORCE=true men REMINDER_OIDC_AUDIENCE/SA mangler');
+    return res.status(500).json({ detail: 'Scheduler auth misconfigured' });
+  }
+
+  const m = String(req.headers.authorization || '').match(/^Bearer (.+)$/);
+  if (!m) return res.status(401).json({ detail: 'Missing bearer token' });
+
+  try {
+    const ticket = await schedulerOidcClient.verifyIdToken({ idToken: m[1], audience });
+    const payload = ticket.getPayload();
+    if (!payload || payload.email !== allowedSa || payload.email_verified !== true) {
+      console.warn(`[SCHEDULER-AUTH] Avvist: feil identitet (email=${payload?.email})`);
+      return res.status(403).json({ detail: 'Forbidden' });
+    }
+    return next();
+  } catch (err: any) {
+    console.warn('[SCHEDULER-AUTH] Token-verifisering feilet:', err?.message || err);
+    return res.status(401).json({ detail: 'Invalid token' });
+  }
+}
+
 // Rate limiting configuration for brute-force protection
 interface RateLimitEntry {
   count: number;
@@ -259,10 +293,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Since we can't use middleware to rewrite URLs with Vite, we'll register both paths
   
   // Helper function to register route on all paths (frontend uses /api/events, /api/proxy/events, and /events)
-  const registerBothPaths = (method: string, path: string, handler: any) => {
-    (app as any)[method](path, handler);
-    (app as any)[method](`/api/proxy${path}`, handler);
-    (app as any)[method](`/api${path}`, handler);
+  const registerBothPaths = (method: string, path: string, ...handlers: any[]) => {
+    (app as any)[method](path, ...handlers);
+    (app as any)[method](`/api/proxy${path}`, ...handlers);
+    (app as any)[method](`/api${path}`, ...handlers);
   };
 
   // ==================== HEALTH & VERSION ====================
@@ -1958,7 +1992,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Process pending reminders - can be called by a cron job
-  registerBothPaths("post", "/process-reminders", async (req, res) => {
+  registerBothPaths("post", "/process-reminders", requireSchedulerAuth, async (req, res) => {
     console.log('[REMINDER] Processing pending reminders...');
     
     try {
