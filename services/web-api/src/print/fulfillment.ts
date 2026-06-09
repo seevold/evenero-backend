@@ -539,7 +539,24 @@ export async function fulfillOrder(orderId: string): Promise<FulfillResult> {
         isPermanent,
         submitAttempts: attemptNow,
         statusUrl: base ? `${base}/print/order/${order.order_number}` : "",
-      }).catch((e) => console.error(`[fulfill] alert-send feilet for ${order.order_number}:`, e));
+      })
+        .then((sent) => {
+          // Self-defeat-fiks: ved transient send-feil (sent===false, f.eks. Mailgun
+          // nede) nullstilles lasse_notified_at så neste fulfillment-forsøk/polling
+          // re-fyrer alarmen — i stedet for å tape ops-varselet i stillhet. Rører
+          // KUN dette flagget (ikke kunde-mail, ordre-status eller Gelato-bestilling).
+          if (sent === false) {
+            return pool
+              .query(
+                `UPDATE print_orders SET lasse_notified_at = NULL WHERE id = $1 AND lasse_notified_at IS NOT NULL`,
+                [orderId],
+              )
+              .then(() =>
+                console.warn(`[fulfill] ops-alarm feilet for ${order.order_number} — flagg nullstilt, re-fyrer neste forsøk`),
+              );
+          }
+        })
+        .catch((e) => console.error(`[fulfill] alert-send feilet for ${order.order_number}:`, e));
     }
 
     return { ok: false, reason };
