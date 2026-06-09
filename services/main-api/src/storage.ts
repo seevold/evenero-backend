@@ -16,6 +16,15 @@ function generateShortId(length = 6): string {
   return result;
 }
 
+// Diskriminert resultat fra verifyPinCode slik at ruten kan skille en EKTE feil kode
+// (skal telle mot verify-lockout) fra utløpt/ingen kode (skal IKKE telle). Dette bryter
+// lockout-kaskaden der en gammel/utløpt kode i innboksen låste brukeren ute.
+export type VerifyPinResult =
+  | { status: 'ok'; user: User }
+  | { status: 'wrong' }
+  | { status: 'expired' }
+  | { status: 'no-code' };
+
 export interface IStorage {
   // User methods
   getUser(id: string): Promise<User | undefined>;
@@ -25,7 +34,7 @@ export interface IStorage {
   deleteUser(id: string): Promise<boolean>;
   listUsers(): Promise<User[]>;
   updateUserPinCode(email: string, pinCode: string | null, expiresAt?: Date): Promise<boolean>;
-  verifyPinCode(email: string, pinCode: string): Promise<User | undefined>;
+  verifyPinCode(email: string, pinCode: string): Promise<VerifyPinResult>;
   updateUserToken(email: string, token: string): Promise<boolean>;
   updateUserLastLogin(email: string): Promise<boolean>;
 
@@ -221,27 +230,30 @@ export class PostgreSQLStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async verifyPinCode(email: string, pinCode: string): Promise<User | undefined> {
+  async verifyPinCode(email: string, pinCode: string): Promise<VerifyPinResult> {
+    // Oppslag på e-post ALENE (ikke pin_code i WHERE) slik at vi kan skille feil
+    // kode fra ingen/utløpt kode. idx_users_lower_email holder dette raskt.
     const [user] = await db.select().from(users)
-      .where(and(
-        sql`LOWER(${users.email}) = LOWER(${email})`,
-        eq(users.pin_code, pinCode)
-      ));
-    
-    if (!user) {
-      return undefined;
+      .where(sql`LOWER(${users.email}) = LOWER(${email})`);
+
+    if (!user || !user.pin_code) {
+      return { status: 'no-code' };
     }
-    
-    // Check if PIN has expired
+
+    // Utløpt kode: rydd den, rapporter 'expired' (teller IKKE mot lockout).
     if (user.pin_expiry && new Date() > new Date(user.pin_expiry)) {
-      // PIN has expired, clear it
       await db.update(users)
         .set({ pin_code: null, pin_expiry: null })
         .where(sql`LOWER(${users.email}) = LOWER(${email})`);
-      return undefined;
+      return { status: 'expired' };
     }
-    
-    return user;
+
+    // Gyldig kode finnes, men input matcher ikke → ekte feil (teller mot lockout).
+    if (user.pin_code !== pinCode) {
+      return { status: 'wrong' };
+    }
+
+    return { status: 'ok', user };
   }
 
   async updateUserToken(email: string, token: string): Promise<boolean> {

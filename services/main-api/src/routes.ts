@@ -137,7 +137,9 @@ function generateBatchId(): string {
 }
 
 function generatePinCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  // Kryptografisk RNG — fjerner forutsigbar PIN. Inkluderende nedre, eksklusiv
+  // øvre → 100000–999999 (6 sifre).
+  return crypto.randomInt(100000, 1000000).toString();
 }
 
 function getBaseUrl(req: any): string {
@@ -352,7 +354,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.warn(`Rate limit exceeded for PIN request: ${email}`);
         return res.status(429).json({ 
           detail: "Too many PIN code requests. Please try again later.",
-          retryAfter: rateLimit.retryAfter
+          retryAfter: rateLimit.retryAfter,
+          errorCode: "rate_limited"
         });
       }
       
@@ -365,15 +368,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         user = await storage.createUser({ email });
       }
 
-      // Generate and save PIN code with expiry (10 minutes)
+      // Generate and save PIN code with expiry (15 minutter — matcher rate-limit-
+      // vinduet og gir slingringsmonn for treg e-postlevering).
       const pinCode = generatePinCode();
-      const pinExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+      const pinExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
       await storage.updateUserPinCode(email, pinCode, pinExpiry);
 
       // Send email with PIN code. Locale priority:
       // (1) recipient's saved DB pref, (2) `locale` field in request body
       // from the frontend's active locale, (3) Accept-Language header
       // (matters for first-time visitors who don't have a user record yet).
+      let sent = false;
       try {
         const { sendPinCodeEmail, resolveEmailLocale } = await import('./emails/index.js');
         const userLocale = resolveEmailLocale(req, user);
@@ -388,17 +393,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ? `${baseLoginUrl}&redirect=${encodeURIComponent(redirect)}`
           : baseLoginUrl;
 
-        await sendPinCodeEmail(email, pinCode, userLocale, loginUrl);
+        sent = await sendPinCodeEmail(email, pinCode, userLocale, loginUrl);
       } catch (emailError) {
         console.error('Error sending email:', emailError);
-        // Don't fail the request if email sending fails
+        sent = false;
+      }
+
+      // Surface en EKTE feil i stedet for falsk 200: brukeren får beskjed om at koden
+      // ikke ble sendt og kan prøve igjen, i stedet for å vente på en e-post som aldri
+      // kom (den synlige delen av 2026-06-08-hendelsen). PIN-en er allerede lagret, så
+      // et nytt forsøk overskriver den trygt.
+      if (!sent) {
+        return res.status(502).json({
+          detail: "Could not send PIN code. Please try again.",
+          errorCode: "send_failed",
+        });
       }
 
       res.json({ message: "PIN code sent successfully" });
     } catch (error) {
       console.error('Error in send-pin-code:', error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ detail: "Invalid email format" });
+        return res.status(400).json({ detail: "Invalid email format", errorCode: "invalid_email" });
       }
       res.status(500).json({ detail: "Internal server error" });
     }
@@ -415,18 +431,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.warn(`Rate limit exceeded for PIN verification: ${email}`);
         return res.status(429).json({ 
           detail: "Too many verification attempts. Account temporarily locked.",
-          retryAfter: rateLimit.retryAfter
+          retryAfter: rateLimit.retryAfter,
+          errorCode: "rate_limited"
         });
       }
 
-      const user = await storage.verifyPinCode(email, pin_code);
-      if (!user) {
-        // Record failed attempt
-        recordAttempt(rateLimitKey);
-        console.warn(`Failed PIN verification attempt for: ${email}`);
-        return res.status(401).json({ detail: "Invalid email or pin code" });
+      const result = await storage.verifyPinCode(email, pin_code);
+      if (result.status !== 'ok') {
+        // Tell KUN ekte feil kode mot verify-lockout. Utløpt/ingen kode teller IKKE
+        // — det bryter lockout-kaskaden (gammel/utløpt kode i innboks låste brukere ute).
+        if (result.status === 'wrong') {
+          recordAttempt(rateLimitKey);
+        }
+        console.warn(`Failed PIN verification (${result.status}) for: ${email}`);
+        return res.status(401).json({
+          detail: result.status === 'expired'
+            ? "PIN code expired. Please request a new one."
+            : "Invalid email or pin code",
+          errorCode: result.status, // 'wrong' | 'expired' | 'no-code'
+        });
       }
-      
+      const user = result.user;
+
       // Clear rate limit on successful verification
       clearRateLimit(rateLimitKey);
       clearRateLimit(getRateLimitKey('send', email));
@@ -451,7 +477,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ detail: "Invalid pin code" });
+        return res.status(400).json({ detail: "Invalid pin code", errorCode: "invalid_pin" });
       }
       res.status(500).json({ detail: "Internal server error" });
     }
