@@ -150,6 +150,18 @@ CREATE INDEX IF NOT EXISTS idx_zip_jobs_event_status ON zip_jobs(event_id, statu
       console.log('[MIGRATIONS] zip_jobs table exists');
     }
 
+    // Funksjonell indeks for case-insensitive e-post-oppslag. Auth (verifyPinCode,
+    // getUserByEmail) filtrerer på LOWER(email), men idx_email er på rå email — så
+    // hver innlogging seq-scanner users. Denne indeksen fjerner seq-scannet, kritisk
+    // for auth-latency under last. Idempotent + liten tabell → trygt på boot.
+    try {
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_users_lower_email ON users (LOWER(email))`);
+      console.log('[MIGRATIONS] idx_users_lower_email ensured');
+    } catch (idxError) {
+      console.log('[MIGRATIONS] ⚠️  Could not create idx_users_lower_email automatically. Run as DB owner:');
+      console.log(`CREATE INDEX IF NOT EXISTS idx_users_lower_email ON users (LOWER(email));`);
+    }
+
     console.log('[MIGRATIONS] Schema check completed');
   } catch (error) {
     console.error('[MIGRATIONS] Error checking schema:', error);
