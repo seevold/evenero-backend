@@ -31,6 +31,9 @@ async function buildPool(): Promise<Pool> {
       keepAlive: true,
       keepAliveInitialDelayMillis: 10000,
       idleTimeoutMillis: 60000,
+      // Fast-fail når DB-en er mettet i stedet for å henge til Cloud Run-timeouten
+      // (300s) — et hengende kall pinner instansen og forsterker connection-stormen.
+      connectionTimeoutMillis: 5000,
     };
 
     console.log(`[DB] Connected via Cloud SQL Connector to ${process.env.CLOUD_SQL_INSTANCE} (auth=${useIam ? "IAM" : "password"}, user=${config.user})`);
@@ -53,6 +56,7 @@ async function buildPool(): Promise<Pool> {
     keepAlive: true,
     keepAliveInitialDelayMillis: 10000,
     idleTimeoutMillis: 60000,
+    connectionTimeoutMillis: 5000,
   });
 }
 

@@ -36,6 +36,31 @@ function applyStagingWhitelist(to: string): { actualTo: string; isRerouted: bool
   return { actualTo: to, isRerouted: false };
 }
 
+function redactEmail(addr: string): string {
+  const at = addr.indexOf('@');
+  return at > 0 ? `${addr[0]}***${addr.slice(at)}` : '***';
+}
+
+function errorCodeForStatus(status: number): string {
+  if (status === 429) return 'rate_limited';
+  if (status >= 500) return 'provider_5xx';
+  return 'provider_4xx';
+}
+
+// Strukturert markør for logg-baserte alarmer. Cloud Run sender stdout-JSON til
+// Cloud Logging som jsonPayload → én alarm på marker="EMAIL_SEND" AND ok=false
+// fanger neste e-post-utfall (kvotestopp/5xx/timeout) som ellers var usynlig.
+function logEmailSend(fields: {
+  ok: boolean;
+  provider: string;
+  status?: number;
+  errorCode?: string;
+  to: string;
+  id?: string;
+}): void {
+  console.log(JSON.stringify({ marker: 'EMAIL_SEND', ...fields }));
+}
+
 export interface SendEmailOptions {
   /**
    * Address replies should go to. For invitations, set this to the
@@ -60,6 +85,7 @@ export async function sendEmail(
     console.log(`[EMAIL] Subject: ${subject}`);
     if (opts.replyTo) console.log(`[EMAIL] Reply-To: ${opts.replyTo}`);
     if (text) console.log(`[EMAIL] Text: ${text.substring(0, 200)}…`);
+    logEmailSend({ ok: true, provider: 'log', to: redactEmail(actualTo) });
     return true;
   }
 
@@ -89,6 +115,13 @@ export async function sendEmail(
     if (!response.ok) {
       const body = await response.text();
       console.error(`[EMAIL] Mailgun ${response.status}: ${body.substring(0, 300)}`);
+      logEmailSend({
+        ok: false,
+        provider: 'mailgun',
+        status: response.status,
+        errorCode: errorCodeForStatus(response.status),
+        to: redactEmail(actualTo),
+      });
       return false;
     }
 
@@ -96,9 +129,11 @@ export async function sendEmail(
     console.log(
       `[EMAIL] Sent ${data.id || '(no id)'} to ${actualTo}${isRerouted ? ` (rerouted from ${to})` : ''}`,
     );
+    logEmailSend({ ok: true, provider: 'mailgun', id: data.id, to: redactEmail(actualTo) });
     return true;
   } catch (error: any) {
     console.error('[EMAIL] Failed to send via Mailgun:', error?.message || error);
+    logEmailSend({ ok: false, provider: 'mailgun', errorCode: 'timeout_or_network', to: redactEmail(actualTo) });
     return false;
   }
 }
