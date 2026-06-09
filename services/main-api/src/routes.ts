@@ -178,6 +178,27 @@ async function verifyToken(token: string): Promise<string | null> {
   }
 }
 
+// Sliding refresh: forny et gyldig 30-dagers token når mindre enn halve levetiden
+// gjenstår, slik at aktive brukere aldri treffer 30-dagers-klippen og må gjennom
+// PIN-flyt på nytt — kutter PIN-e-postvolumet kraftig. Terskel er env-konfigurerbar
+// (for testing på staging). jwt_session_token i DB brukes ikke til validering, så
+// det fornyede tokenet virker uten DB-skriv. Returnerer nytt token, ellers undefined.
+const TOKEN_REFRESH_THRESHOLD_DAYS = parseInt(process.env.TOKEN_REFRESH_THRESHOLD_DAYS || '15', 10);
+function maybeRefreshToken(token: string, email: string): string | undefined {
+  try {
+    const decoded = jwt.decode(token) as { exp?: number } | null;
+    if (!decoded?.exp) return undefined;
+    const remainingSec = decoded.exp - Math.floor(Date.now() / 1000);
+    const thresholdSec = TOKEN_REFRESH_THRESHOLD_DAYS * 24 * 60 * 60;
+    if (remainingSec > 0 && remainingSec < thresholdSec) {
+      return generateToken(email);
+    }
+  } catch {
+    // ignorer — behold eksisterende token
+  }
+  return undefined;
+}
+
 // Extract token from Authorization header (Bearer token)
 function getTokenFromHeader(req: any): string | null {
   const authHeader = req.headers.authorization || req.headers.Authorization;
@@ -330,6 +351,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(401).json({ detail: "Unauthorized" });
     }
 
+    // Sliding refresh: hvis tokenet nærmer seg 30-dagers-klippen, send et friskt
+    // token tilbake som klienten lagrer (additivt — uten `token` oppfører klienten
+    // seg som før). Aktive brukere fornyes løpende og slipper PIN-flyt på nytt.
+    const refreshedToken = maybeRefreshToken(token, email);
+
     res.json({
       id: user.id,
       email: user.email,
@@ -339,7 +365,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       name: user.name,
       role: user.role,
       event_credit: user.event_credit,
-      preferred_locale: user.preferred_locale
+      preferred_locale: user.preferred_locale,
+      ...(refreshedToken ? { token: refreshedToken } : {})
     });
   });
 
