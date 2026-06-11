@@ -7,12 +7,15 @@
 // (faktisk linje-pris til Stripe Session). Disse MÅ være identiske ellers
 // får vi mismatch mellom det kunden ser og det de betaler.
 
-import type { PrintProduct, PrintQtyVariant, PrintAddon } from "@shared/schema";
+import type { PrintProduct, PrintQtyVariant, PrintAddon, PrintPricesByCurrency } from "@shared/schema";
 
 export interface PriceQueryItem {
   product: PrintProduct;
   qty: number;
   addonSlugs?: string[];          // valgte addons
+  /** Valuta å prise i. NOK (default) leser qty_variants; andre valutaer leser
+   *  prices_by_currency (uten addons — addons er NOK-only i fase 1). */
+  currency?: string;
 }
 
 export interface PricedItem {
@@ -143,8 +146,32 @@ export function priceItem(query: PriceQueryItem, locale: string = "no"): PricedI
 
   const variant = resolveVariant(query.qty, variants);
   const baseUid = variant.gelato_uid || query.product.defaultGelatoUid;
-  const addonResult = applyAddons(query.product, query.addonSlugs || [], variant.qty, baseUid);
+  const currency = (query.currency || "NOK").toUpperCase();
 
+  // ── Multi-valuta (ikke NOK): les prisbok, ingen addons (NOK-only i fase 1) ──
+  if (currency !== "NOK") {
+    const pbc = (query.product.pricesByCurrency as unknown as PrintPricesByCurrency) || {};
+    const tier = pbc[currency]?.[String(variant.qty)];
+    // Fallback til NOK hvis valutaen ikke er seedet for dette produktet ennå —
+    // graceful, hindrer at en kunde får ingen pris. (Skal ikke skje etter seed.)
+    if (tier?.retail_minor != null) {
+      return {
+        productSlug: query.product.slug,
+        gelatoUid: baseUid,                 // ingen addon-UID-modifikasjon (addons av)
+        qty: variant.qty,
+        unitPriceMinor: Math.round(tier.retail_minor / variant.qty),
+        lineTotalMinor: tier.retail_minor,
+        addonsApplied: [],
+        variantQty: variant.qty,
+        recommended: variant.recommended || false,
+        upgradeLabel: variant.upgrade_label,
+      };
+    }
+    // (faller gjennom til NOK-prising under hvis tier mangler)
+  }
+
+  // ── NOK (anker) — uendret oppførsel, inkl. addons ──
+  const addonResult = applyAddons(query.product, query.addonSlugs || [], variant.qty, baseUid);
   const lineTotalMinor = variant.retail_minor + addonResult.totalSurchargeMinor;
   const unitPriceMinor = Math.round(lineTotalMinor / variant.qty);
 
