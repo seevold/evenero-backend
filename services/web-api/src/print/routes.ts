@@ -19,8 +19,9 @@ import { sendPrintOrderConfirmation, sendPrintOrderShipped } from "./email";
 import { formatOrderLineLabel } from "./format";
 import { verifySuperuser } from "./admin-auth";
 import { getPrintSettings, updatePrintSettings } from "./settings";
+import { currencyForCountry, isAnchorCurrency } from "./currency";
 import { uploadPreorderDesign, validateDesignDataUrl } from "./storage";
-import type { PrintProduct, PrintCategory, PrintAddon, PrintQtyVariant } from "@shared/schema";
+import type { PrintProduct, PrintCategory, PrintAddon, PrintQtyVariant, PrintPricesByCurrency } from "@shared/schema";
 
 const ALLOWED_COUNTRIES_V1 = [
   "NO","SE","DK","FI","IS",
@@ -63,6 +64,7 @@ async function loadCatalog(): Promise<CatalogCache> {
             pdf_renderer AS "pdfRenderer", addons,
             pack_size AS "packSize", allow_custom_qty AS "allowCustomQty",
             product_info AS "productInfo", metadata,
+            prices_by_currency AS "pricesByCurrency",
             last_price_refresh_at AS "lastPriceRefreshAt",
             active, created_at AS "createdAt", updated_at AS "updatedAt"
      FROM print_products WHERE active`,
@@ -133,6 +135,14 @@ interface CatalogResponseProduct {
 
 function buildCatalogResponse(catalog: CatalogCache, country?: string) {
   const validCountry = country && ALLOWED_COUNTRIES_V1.includes(country) ? country : "NO";
+  // Resolve valuta fra land. NOK leser qty_variants; andre valutaer leser
+  // prices_by_currency (med NOK-fallback hvis ikke seedet for produktet ennå).
+  const currency = currencyForCountry(validCountry);
+  const retailFor = (p: PrintProduct, v: PrintQtyVariant): number => {
+    if (isAnchorCurrency(currency)) return v.retail_minor;
+    const pbc = (p as unknown as { pricesByCurrency?: PrintPricesByCurrency }).pricesByCurrency || {};
+    return pbc[currency]?.[String(v.qty)]?.retail_minor ?? v.retail_minor;
+  };
 
   const products = catalog.products
     .filter((p) => !p.allowedCountries || p.allowedCountries.includes(validCountry))
@@ -144,21 +154,29 @@ function buildCatalogResponse(catalog: CatalogCache, country?: string) {
         displayName: p.displayName as Record<string, string>,
         widthMm: p.widthMm,
         heightMm: p.heightMm,
-        qtyVariants: variants.map((v) => ({
-          qty: v.qty,
-          retailMinor: v.retail_minor,
-          pricePerUnitMinor: Math.round(v.retail_minor / v.qty),
-          recommended: v.recommended,
-          upgradeLabel: v.upgrade_label,
-        })),
-        addons: (p.addons as PrintAddon[] || []).map((a) => ({
-          slug: a.slug,
-          label: a.label,
-          description: a.description,
-          surchargeMinor: a.surcharge_minor,
-          surchargeMode: a.surcharge_mode || "flat",
-          conflictsWith: a.conflictsWith,
-        })),
+        qtyVariants: variants.map((v) => {
+          const retail = retailFor(p, v);
+          return {
+            qty: v.qty,
+            retailMinor: retail,
+            pricePerUnitMinor: Math.round(retail / v.qty),
+            recommended: v.recommended,
+            upgradeLabel: v.upgrade_label,
+          };
+        }),
+        // Addons er NOK-only i fase 1 (surcharges ikke priset per valuta).
+        // For andre valutaer skjuler vi dem så kunden ikke kan velge en
+        // upgrade vi ikke kan prise riktig.
+        addons: isAnchorCurrency(currency)
+          ? (p.addons as PrintAddon[] || []).map((a) => ({
+              slug: a.slug,
+              label: a.label,
+              description: a.description,
+              surchargeMinor: a.surcharge_minor,
+              surchargeMode: a.surcharge_mode || "flat",
+              conflictsWith: a.conflictsWith,
+            }))
+          : [],
         expressSurchargeMinor: p.expressSurchargeMinor,
         allowedCountries: p.allowedCountries || [],
         relatedProductSlugs: p.relatedProductSlugs || [],
@@ -186,9 +204,17 @@ function buildCatalogResponse(catalog: CatalogCache, country?: string) {
     // "fra X kr/stk" — alltid laveste pris-per-enhet, så plakat vises
     // konsistent med kort (ikke 1-stk-totalprisen, som er dyrest per enhet).
     const fromPriceMode = "per_unit" as const;
+    // Laveste pris-per-enhet i resolved valuta (NOK via lowestUnitPriceMinor,
+    // ellers fra prices_by_currency).
+    const lowestUnitFor = (p: PrintProduct): number => {
+      if (isAnchorCurrency(currency)) return lowestUnitPriceMinor(p);
+      const packSize = (p as unknown as { packSize?: number }).packSize || 1;
+      const variants = p.qtyVariants as unknown as PrintQtyVariant[];
+      return Math.min(...variants.map((v) => Math.round(retailFor(p, v) / (v.qty * packSize))));
+    };
     const fromPriceMinor = flatProducts.length === 0
       ? 0
-      : Math.min(...flatProducts.map((p) => lowestUnitPriceMinor(p)));
+      : Math.min(...flatProducts.map((p) => lowestUnitFor(p)));
     return {
       slug: c.slug,
       formatFamily: c.formatFamily,
@@ -202,7 +228,7 @@ function buildCatalogResponse(catalog: CatalogCache, country?: string) {
     };
   });
 
-  return { categories, products, allowedCountries: ALLOWED_COUNTRIES_V1 };
+  return { categories, products, allowedCountries: ALLOWED_COUNTRIES_V1, currency };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -259,6 +285,7 @@ async function handleQuote(req: Request, res: Response) {
 
   const catalog = await loadCatalog();
   const productMap = new Map(catalog.products.map((p) => [p.slug, p]));
+  const currency = currencyForCountry(country);
 
   // Prising per item
   const pricedItems = [];
@@ -277,7 +304,7 @@ async function handleQuote(req: Request, res: Response) {
       });
     }
     try {
-      const priced = priceItem({ product, qty: it.qty, addonSlugs: it.addonSlugs });
+      const priced = priceItem({ product, qty: it.qty, addonSlugs: it.addonSlugs, currency });
       subtotalMinor += priced.lineTotalMinor;
       pricedItems.push({
         ...priced,
@@ -309,7 +336,7 @@ async function handleQuote(req: Request, res: Response) {
     // i landets hovedstad. Frakt/leveringsdager kan variere per postnummer.
     const quote = await gelato.quoteOrder({
       orderReferenceId: `quote-${Date.now()}`,
-      currency: "NOK",
+      currency,
       recipient: {
         firstName: "Quote", lastName: "Estimat",
         addressLine1: "Test 1",
@@ -403,7 +430,7 @@ async function handleQuote(req: Request, res: Response) {
     items: pricedItems,
     subtotalMinor,
     bundleDiscountMinor: bundleDiscountMinor(pricedItems.length, subtotalMinor),
-    currency: "nok",                          // Stripe Adaptive Pricing håndterer FX
+    currency: currency.toLowerCase(),         // resolved valuta (nok/sek/dkk/eur)
     shippingOptions,
     estimatedDelivery: estDelivery,
     needsBundleSuggestion,
@@ -504,6 +531,10 @@ async function handleCheckout(req: Request, res: Response) {
 
   const catalog = await loadCatalog();
   const productMap = new Map(catalog.products.map((p) => [p.slug, p]));
+  // Resolve valuta fra land — samme regel som catalog/quote → vist pris ==
+  // belastet pris. Brukes for prising, Gelato-quote og Stripe-linjer.
+  const currency = currencyForCountry(body.country);
+  const stripeCurrency = currency.toLowerCase();
 
   // Re-pris alt server-side (kunden kan ha endret priser i devtools)
   const pricedItems = [];
@@ -514,7 +545,7 @@ async function handleCheckout(req: Request, res: Response) {
       return res.status(400).json({ error: "PRODUCT_NOT_FOUND", slug: it.productSlug });
     }
     try {
-      const priced = priceItem({ product, qty: it.qty, addonSlugs: it.addonSlugs });
+      const priced = priceItem({ product, qty: it.qty, addonSlugs: it.addonSlugs, currency });
       subtotalMinor += priced.lineTotalMinor;
       pricedItems.push({ priced, source: it, product });
     } catch (err) {
@@ -533,7 +564,7 @@ async function handleCheckout(req: Request, res: Response) {
     const gelato = gelatoFromEnv();
     const quote = await gelato.quoteOrder({
       orderReferenceId: `checkout-${Date.now()}`,
-      currency: "NOK",
+      currency,
       recipient: {
         firstName: body.shipping.name.split(" ")[0] || "Customer",
         lastName: body.shipping.name.split(" ").slice(1).join(" ") || "X",
@@ -593,7 +624,7 @@ async function handleCheckout(req: Request, res: Response) {
          gelato_order_reference_id, total_minor, shipping_minor, currency,
          shipping_address, shipping_method_uid, shipping_method_name,
          locale, app_base_url)
-       VALUES ($1,$2,$3,'pending',$4,$5,$6,'nok',$7::jsonb,$8,$9,$10,$11)`,
+       VALUES ($1,$2,$3,'pending',$4,$5,$6,$12,$7::jsonb,$8,$9,$10,$11)`,
       [
         orderId, orderNumber, body.customerEmail, gelatoRef,
         totalMinor, shippingMinor,
@@ -608,6 +639,7 @@ async function handleCheckout(req: Request, res: Response) {
         shippingMethodUid, shippingMethodName,
         body.locale || "en",
         body.returnBaseUrl.replace(/\/$/, ""),
+        stripeCurrency,
       ],
     );
     for (const p of pricedItems) {
@@ -657,7 +689,7 @@ async function handleCheckout(req: Request, res: Response) {
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = pricedItems.map((p) => ({
     quantity: 1,  // line_total er allerede for hele qty
     price_data: {
-      currency: "nok",
+      currency: stripeCurrency,
       unit_amount: p.priced.lineTotalMinor,
       product_data: {
         name: formatOrderLineLabel({
@@ -675,7 +707,7 @@ async function handleCheckout(req: Request, res: Response) {
     lineItems.push({
       quantity: 1,
       price_data: {
-        currency: "nok",
+        currency: stripeCurrency,
         unit_amount: shippingMinor,
         product_data: { name: "Express-levering" },
       },
@@ -730,7 +762,7 @@ async function handleCheckout(req: Request, res: Response) {
     orderId, orderNumber,
     checkoutUrl: session.url,
     totalMinor,
-    currency: "nok",
+    currency: stripeCurrency,
   });
 }
 

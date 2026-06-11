@@ -110,6 +110,9 @@ export const printProducts = pgTable("print_products", {
   productInfo: jsonb("product_info"),
   // Generelt metadata: { bleed_mm, dpi, paper_thickness_g, ... }
   metadata: jsonb("metadata"),
+  // Per-valuta prisbok (NOK ligger i qty_variants). Keyet currency → qty →
+  // { retail_minor, margin_pct }. Fylt av seed (Gelato-lokalkost + markup).
+  pricesByCurrency: jsonb("prices_by_currency").notNull().default({}),
   lastPriceRefreshAt: timestamp("last_price_refresh_at"),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -228,6 +231,13 @@ export type PrintQtyVariant = {
   recommended?: boolean;        // vis ⭐-badge
   upgrade_label?: string;       // 'Matt-lamiert' osv.
 };
+
+// prices_by_currency type — currency → qty (string) → pris. NOK ligger i
+// qty_variants; dette dekker ekstra-valutaer (SEK/DKK/EUR ...).
+export type PrintPricesByCurrency = Record<
+  string,
+  Record<string, { retail_minor: number; margin_pct: number }>
+>;
 
 export type PrintAddon = {
   slug: string;                            // 'premium_paper', 'paper_matt', ...
