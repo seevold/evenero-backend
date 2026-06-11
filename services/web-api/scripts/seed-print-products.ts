@@ -114,17 +114,25 @@ async function quoteLanded(
   }
 }
 
-// Avrund retail til "pene" tall:
-//   < 500 NOK: nærmeste 49 (eks 349, 449, 499)
-//   500-999:   nærmeste 95 (eks 595, 795, 895)
-//   1000+:     nærmeste 90 (eks 1290, 1490, 1990)
-function roundRetail(minor: number): number {
-  const kr = minor / 100;
+// Avrund retail til "pene" tall. Valuta-aware fordi EUR har en annen
+// størrelsesorden (~tier) enn NOK/SEK/DKK (~hundrer).
+//   NOK/SEK/DKK < 500: nærmeste 49 (349, 449, 499)
+//   NOK/SEK/DKK 500-999: nærmeste 95 (595, 795, 895)
+//   NOK/SEK/DKK 1000+: nærmeste 90 (1290, 1490, 1990)
+//   EUR (alle): rund OPP til neste X9 i tier (29, 39, 149, 349)
+// Aldri rund NED — vi vil ha margin.
+function roundRetail(minor: number, currency: string = "NOK"): number {
+  const major = minor / 100;
+  if (currency.toUpperCase() === "EUR") {
+    let r = Math.ceil((major - 9) / 10) * 10 + 9; // 22→29, 31→39, 145→149
+    if (r < major) r += 10;
+    return Math.round(r) * 100;
+  }
   let rounded: number;
-  if (kr < 500) rounded = Math.round((kr - 49) / 100) * 100 + 49;
-  else if (kr < 1000) rounded = Math.round((kr - 95) / 100) * 100 + 95;
-  else rounded = Math.round((kr - 90) / 100) * 100 + 90;
-  if (rounded < kr) rounded += 100; // aldri rund NED — vi vil ha margin
+  if (major < 500) rounded = Math.round((major - 49) / 100) * 100 + 49;
+  else if (major < 1000) rounded = Math.round((major - 95) / 100) * 100 + 95;
+  else rounded = Math.round((major - 90) / 100) * 100 + 90;
+  if (rounded < major) rounded += 100;
   return Math.round(rounded) * 100;
 }
 
@@ -172,6 +180,60 @@ async function computeVariants(product: ProductDef): Promise<ComputedVariant[]> 
       console.log(
         `    qty=${v.qty.toString().padStart(4)} | landed ${cost.landed.toFixed(2)} (prod ${cost.productPrice.toFixed(0)} + ${cost.shippingType} ${cost.shippingPrice.toFixed(0)}) | retail ${(retailMinor/100).toFixed(0)} kr | margin ${marginPct.toFixed(0)}%`,
       );
+    }
+  }
+  return out;
+}
+
+// ─── Multi-valuta prisbok ──────────────────────────────────────────────────
+// Hver ekstra-valuta prises nativt: quote Gelato i den valutaen + et
+// representativt land i sonen, legg på samme markup, rund pent. Lagres i
+// prices_by_currency. NOK ligger fortsatt i qty_variants (uendret).
+
+const EXTRA_CURRENCIES = ["SEK", "DKK", "EUR"] as const;
+const CURRENCY_QUOTE_COUNTRY: Record<string, string> = {
+  SEK: "SE", DKK: "DK", EUR: "DE", // DE = sentralt euro-land for quoting
+};
+
+type CurrencyTiers = Record<string, { retail_minor: number; margin_pct: number }>;
+
+async function computePricesByCurrency(
+  product: ProductDef,
+): Promise<Record<string, CurrencyTiers>> {
+  const out: Record<string, CurrencyTiers> = {};
+  for (const cur of EXTRA_CURRENCIES) {
+    const country = CURRENCY_QUOTE_COUNTRY[cur];
+    const tiers: Array<{ qty: number; retail_minor: number; margin_pct: number }> = [];
+    for (const v of product.variants) {
+      const uid = v.gelatoUid || product.defaultGelatoUid;
+      const cost = await quoteLanded(uid, v.qty, country, cur);
+      if (!cost) continue;
+      const landedMinor = Math.round(cost.landed * 100);
+      const retailMinor = roundRetail(
+        Math.round(landedMinor / (1 - product.markupTargetPct / 100)), cur,
+      );
+      tiers.push({ qty: v.qty, retail_minor: retailMinor, margin_pct: 0 });
+      // margin beregnes etter kollisjons-justering nedenfor
+      (tiers[tiers.length - 1] as any)._landed = landedMinor;
+    }
+    if (!tiers.length) continue;
+    // Auto-kollisjons-resolver: garanter strengt stigende retail per tier
+    // (qty sortert). Hindrer at to nabotrinn runder likt i denne valutaen —
+    // samme prinsipp som NOK-overstyringen, men automatisk.
+    tiers.sort((a, b) => a.qty - b.qty);
+    let prev = 0;
+    for (const t of tiers) {
+      if (t.retail_minor <= prev) t.retail_minor = roundRetail(prev + 100, cur);
+      prev = t.retail_minor;
+      const landed = (t as any)._landed as number;
+      t.margin_pct = Math.round(((t.retail_minor - landed) / t.retail_minor) * 1000) / 10;
+      delete (t as any)._landed;
+    }
+    out[cur] = Object.fromEntries(
+      tiers.map((t) => [String(t.qty), { retail_minor: t.retail_minor, margin_pct: t.margin_pct }]),
+    );
+    if (VERBOSE || !APPLY) {
+      console.log(`    [${cur}] ` + tiers.map((t) => `q${t.qty}=${(t.retail_minor/100).toFixed(0)}(${t.margin_pct}%)`).join(" "));
     }
   }
   return out;
@@ -263,9 +325,10 @@ async function upsertProduct(
   product: ProductDef,
   variants: ComputedVariant[],
   addonsForDb: ComputedAddon[],
+  pricesByCurrency: Record<string, CurrencyTiers>,
 ): Promise<void> {
   if (!APPLY) {
-    console.log(`  [dry] produkt ${product.slug}: ${variants.length} varianter, ${addonsForDb.length} addons`);
+    console.log(`  [dry] produkt ${product.slug}: ${variants.length} varianter, ${addonsForDb.length} addons, ${Object.keys(pricesByCurrency).length} ekstra-valutaer`);
     for (const v of variants) {
       console.log(`         qty=${v.qty} retail=${(v.retail_minor/100).toFixed(0)} margin=${v.margin_pct}%`);
     }
@@ -279,12 +342,12 @@ async function upsertProduct(
       (slug, category_slug, product_type, display_name, width_mm, height_mm,
        default_gelato_uid, qty_variants, express_surcharge_minor, markup_target_pct,
        allowed_countries, related_product_slugs, pdf_renderer, addons,
-       pack_size, allow_custom_qty, product_info, metadata,
+       pack_size, allow_custom_qty, product_info, metadata, prices_by_currency,
        last_price_refresh_at, active, updated_at)
      VALUES ($1, $2, $3, $4::jsonb, $5, $6,
              $7, $8::jsonb, $9, $10,
              $11, $12, $13, $14::jsonb,
-             $15, $16, $17::jsonb, $18::jsonb,
+             $15, $16, $17::jsonb, $18::jsonb, $19::jsonb,
              NOW(), TRUE, NOW())
      ON CONFLICT (slug) DO UPDATE SET
        category_slug = EXCLUDED.category_slug,
@@ -303,6 +366,7 @@ async function upsertProduct(
        allow_custom_qty = EXCLUDED.allow_custom_qty,
        product_info = EXCLUDED.product_info,
        metadata = EXCLUDED.metadata,
+       prices_by_currency = EXCLUDED.prices_by_currency,
        last_price_refresh_at = NOW(),
        updated_at = NOW()`,
     [
@@ -320,6 +384,7 @@ async function upsertProduct(
       product.allowCustomQty || false,
       product.productInfo ? JSON.stringify(product.productInfo) : null,
       product.metadata ? JSON.stringify(product.metadata) : null,
+      JSON.stringify(pricesByCurrency),
     ],
   );
   console.log(`  ✓ produkt ${product.slug} (${variants.length} varianter, retail ${(variants[0].retail_minor/100).toFixed(0)} – ${(variants.at(-1)!.retail_minor/100).toFixed(0)} kr)`);
@@ -353,7 +418,8 @@ async function main() {
       continue;
     }
     const addons = await computeAddons(product);
-    await upsertProduct(product, variants, addons);
+    const pricesByCurrency = await computePricesByCurrency(product);
+    await upsertProduct(product, variants, addons, pricesByCurrency);
     totalProducts++;
     totalVariants += variants.length;
   }
