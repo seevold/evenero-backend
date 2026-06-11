@@ -20,6 +20,11 @@ export type ProductVariantDef = {
   gelatoUid?: string;
   recommended?: boolean;
   upgradeLabel?: string;
+  /** Manuell retail-overstyring i øre. Når satt: bruk denne i stedet for
+   *  markup-formelen + roundRetail. Brukes for å rette opp pris-kollisjoner
+   *  der to nabotrinn avrundes likt (seed logger faktisk margin uansett, så
+   *  vi ser at den holder seg sunn). Hev aldri UNDER landed-kost. */
+  retailMinorOverride?: number;
 };
 
 export type ProductAddonDef = {
@@ -185,11 +190,14 @@ export const PRODUCTS: ProductDef[] = [
     packSize: 10,
     productInfo: CARD_PRODUCT_INFO,
     variants: [
-      { qty: 1, recommended: true },  // 10 kort
-      { qty: 3 },                      // 30 kort
-      { qty: 5 },                      // 50 kort
-      { qty: 10 },                     // 100 kort
-      { qty: 20 },                     // 200 kort
+      { qty: 1, recommended: true },           // 10 kort
+      { qty: 2 },                               // 20 kort — 449
+      { qty: 3, retailMinorOverride: 49900 },   // 30 kort — 499 (unngå kollisjon med 20)
+      { qty: 4 },                               // 40 kort
+      { qty: 5 },                               // 50 kort
+      { qty: 6 },                               // 60 kort
+      { qty: 10 },                              // 100 kort
+      { qty: 20 },                              // 200 kort
     ],
     addons: CARD_ADDONS,
     expressSurchargeMinor: 5000,
@@ -207,11 +215,14 @@ export const PRODUCTS: ProductDef[] = [
     packSize: 10,
     productInfo: CARD_PRODUCT_INFO,
     variants: [
-      { qty: 1, recommended: true },
-      { qty: 3 },
-      { qty: 5 },
-      { qty: 10 },
-      { qty: 20 },
+      { qty: 1, recommended: true },  // 10 kort
+      { qty: 2 },                      // 20 kort
+      { qty: 3 },                      // 30 kort
+      { qty: 4 },                      // 40 kort
+      { qty: 5 },                      // 50 kort
+      { qty: 6 },                      // 60 kort
+      { qty: 10 },                     // 100 kort
+      { qty: 20 },                     // 200 kort
     ],
     addons: CARD_ADDONS,
     expressSurchargeMinor: 5000,
@@ -231,11 +242,14 @@ export const PRODUCTS: ProductDef[] = [
     packSize: 10,
     productInfo: CARD_PRODUCT_INFO,
     variants: [
-      { qty: 1, recommended: true },
-      { qty: 3 },
-      { qty: 5 },
-      { qty: 10 },
-      { qty: 20 },
+      { qty: 1, recommended: true },           // 10 kort
+      { qty: 2 },                               // 20 kort
+      { qty: 3 },                               // 30 kort
+      { qty: 4 },                               // 40 kort
+      { qty: 5 },                               // 50 kort — 695
+      { qty: 6, retailMinorOverride: 79500 },   // 60 kort — 795 (unngå kollisjon med 50)
+      { qty: 10 },                              // 100 kort
+      { qty: 20 },                              // 200 kort
     ],
     addons: SQUARE_ADDONS,
     expressSurchargeMinor: 5000,

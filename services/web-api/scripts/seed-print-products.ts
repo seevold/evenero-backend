@@ -148,7 +148,15 @@ async function computeVariants(product: ProductDef): Promise<ComputedVariant[]> 
       continue;
     }
     const landedMinor = Math.round(cost.landed * 100);
-    const retailMinor = roundRetail(Math.round(landedMinor / (1 - product.markupTargetPct / 100)));
+    // Manuell override (for å rette pris-kollisjoner) vinner over formelen.
+    // Vakt: aldri under landed-kost (ville gitt negativ margin).
+    const computedRetail = roundRetail(Math.round(landedMinor / (1 - product.markupTargetPct / 100)));
+    const retailMinor = v.retailMinorOverride && v.retailMinorOverride > landedMinor
+      ? v.retailMinorOverride
+      : computedRetail;
+    if (v.retailMinorOverride && v.retailMinorOverride <= landedMinor) {
+      console.log(`  ⚠ ${product.slug} qty=${v.qty}: override ${(v.retailMinorOverride/100).toFixed(0)} ≤ landed ${cost.landed.toFixed(0)} — ignorert, bruker formel`);
+    }
     const marginPct = ((retailMinor - landedMinor) / retailMinor) * 100;
     const item: ComputedVariant = {
       qty: v.qty,
