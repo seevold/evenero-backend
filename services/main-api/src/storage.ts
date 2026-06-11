@@ -382,8 +382,9 @@ export class PostgreSQLStorage implements IStorage {
       conditions.push(eq(event_images.archived, false));
     }
 
-    // since = inkrementell henting for slideshow-polling: kun bilder lastet opp
-    // ETTER tidspunktet (strengt gt — klienten deduper på id ved ms-kollisjon).
+    // since = filter på uploaded_at > since (strengt gt). NB: uploaded_at er
+    // klient-styrt ved opplasting (ofte EXIF-/fildato, ikke upload-tidspunkt) —
+    // se kommentaren i routes.ts før dette brukes til "hva er nytt"-polling.
     // Treffer composite-indeksen (event_id, uploaded_at DESC) direkte.
     if (since) {
       conditions.push(gt(event_images.uploaded_at, since));

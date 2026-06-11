@@ -1323,9 +1323,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ detail: "Event ID is required" });
     }
 
-    // ?since=<ISO 8601> gir kun bilder lastet opp etter tidspunktet. Lar
-    // slideshow-polling (hvert 10.-30. s per åpen skjerm) hente inkrementelt i
-    // stedet for hele listen — uten param er responsen uendret (bakoverkompatibel).
+    // ?since=<ISO 8601> filtrerer på uploaded_at > since. NB: uploaded_at kan
+    // settes av klienten ved opplasting (EXIF-/fildato — verifisert ned til 2012
+    // i reelle data), så dette er "tatt etter", IKKE "lastet opp etter". For
+    // "hva er nytt"-polling (slideshow): poll /images-count og refetch full
+    // liste ved endring — ikke bruk since alene, ellers forsvinner nyopplastede
+    // bilder med gammel EXIF-dato. Uten param er responsen uendret.
     let since: Date | undefined;
     const sinceParam = req.query.since;
     if (typeof sinceParam === 'string' && sinceParam.length > 0) {
