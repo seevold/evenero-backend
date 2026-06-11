@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { pool } from "./db";
 import { users, events, event_images, event_reminders, event_guest_participants, feature_requests, event_image_likes, qr_template_downloads, zip_jobs, payments } from "@shared/schema";
-import { eq, and, or, sql, desc, isNull, lte, gte, inArray } from "drizzle-orm";
+import { eq, and, or, sql, desc, isNull, lte, gte, gt, inArray } from "drizzle-orm";
 import type { User, InsertUser, Event, InsertEvent, EventImage, InsertEventImage, EventReminder, InsertEventReminder, EventGuestParticipant, InsertEventGuestParticipant, FeatureRequest, InsertFeatureRequest, EventImageLike, InsertEventImageLike, QrTemplateDownload, InsertQrTemplateDownload, ZipJob, InsertZipJob } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -49,7 +49,7 @@ export interface IStorage {
   checkEventExists(eventId: string): Promise<boolean>;
 
   // Event image methods
-  getEventImages(eventId: string, includeArchived?: boolean): Promise<EventImage[]>;
+  getEventImages(eventId: string, includeArchived?: boolean, since?: Date): Promise<EventImage[]>;
   addEventImages(images: InsertEventImage[]): Promise<EventImage[]>;
   findExistingByTitleSize(
     eventId: string,
@@ -371,17 +371,24 @@ export class PostgreSQLStorage implements IStorage {
   }
 
   // Event image methods
-  async getEventImages(eventId: string, includeArchived = false): Promise<EventImage[]> {
+  async getEventImages(eventId: string, includeArchived = false, since?: Date): Promise<EventImage[]> {
     const conditions = [
       eq(event_images.event_id, eventId),
       eq(event_images.share_consent, true),
       eq(event_images.moderation_status, 'approved')
     ];
-    
+
     if (!includeArchived) {
       conditions.push(eq(event_images.archived, false));
     }
-    
+
+    // since = inkrementell henting for slideshow-polling: kun bilder lastet opp
+    // ETTER tidspunktet (strengt gt — klienten deduper på id ved ms-kollisjon).
+    // Treffer composite-indeksen (event_id, uploaded_at DESC) direkte.
+    if (since) {
+      conditions.push(gt(event_images.uploaded_at, since));
+    }
+
     return await db.select().from(event_images)
       .where(and(...conditions))
       .orderBy(desc(event_images.uploaded_at));

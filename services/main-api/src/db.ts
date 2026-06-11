@@ -27,7 +27,12 @@ async function buildPool(): Promise<Pool> {
       user: process.env.DB_USER || (useIam ? undefined : "postgres"),
       ...(useIam ? {} : { password: process.env.DB_PASSWORD }),
       database: process.env.DB_NAME || "postgres",
-      max: 10,
+      // Connection-budsjett: max × Cloud Run maxScale må holde seg under DB-ens
+      // max_connections (200). 6×25 (main-api) + 5×10 (web-api) + 5 (cleanup-job)
+      // = 205 teoretisk maks — overskytende fast-failer rent i stedet for å OOM-e
+      // databasen. Spørringene er indekserte (ms), så 6 conns metter ikke ved
+      // conc 80 — kø-ventetid er målt/beregnet til <1s selv ved full instans.
+      max: 6,
       keepAlive: true,
       keepAliveInitialDelayMillis: 10000,
       idleTimeoutMillis: 60000,

@@ -1323,11 +1323,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ detail: "Event ID is required" });
     }
 
+    // ?since=<ISO 8601> gir kun bilder lastet opp etter tidspunktet. Lar
+    // slideshow-polling (hvert 10.-30. s per åpen skjerm) hente inkrementelt i
+    // stedet for hele listen — uten param er responsen uendret (bakoverkompatibel).
+    let since: Date | undefined;
+    const sinceParam = req.query.since;
+    if (typeof sinceParam === 'string' && sinceParam.length > 0) {
+      const parsed = new Date(sinceParam);
+      if (isNaN(parsed.getTime())) {
+        return res.status(400).json({ detail: "Invalid 'since' timestamp — use ISO 8601, e.g. 2026-06-11T12:00:00Z" });
+      }
+      since = parsed;
+    }
+
     try {
       // ?includeArchived=true brukes på manage-event-siden for å vise total
       // antall opplastet (inkl. soft-deleted). Default false så galleri-sider
       // ikke får arkiverte i listevisning.
-      const images = await storage.getEventImages(event_id, includeArchived);
+      const images = await storage.getEventImages(event_id, includeArchived, since);
       res.json(images);
     } catch (error) {
       res.status(500).json({ detail: "Internal server error" });
