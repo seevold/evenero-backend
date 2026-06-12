@@ -612,11 +612,18 @@ export class PostgreSQLStorage implements IStorage {
     imageCount: number;
     videoCount: number;
   }> {
-    const videoExtensions = ['mp4', 'mov', 'avi', 'webm', 'mkv', 'm4v', '3gp'];
-    
-    const results = await db.select({
-      file_size: event_images.file_size,
-      file_extension: event_images.file_extension
+    // Aggregeres i SQL i stedet for å hente alle radene og summere i JS —
+    // manage-siden kaller denne hyppig, og full radhenting var en av de
+    // dyreste spørringene i Query Insights. Video-deteksjonen speiler den
+    // gamle JS-logikken eksakt: lowercase + strip '.' før match mot listen,
+    // og NULL size/extension behandles som 0/''.
+    const isVideo = sql`replace(lower(coalesce(${event_images.file_extension}, '')), '.', '') in ('mp4', 'mov', 'avi', 'webm', 'mkv', 'm4v', '3gp')`;
+
+    const [row] = await db.select({
+      imageBytes: sql`coalesce(sum(coalesce(${event_images.file_size}, 0)) filter (where not (${isVideo})), 0)`.mapWith(Number),
+      videoBytes: sql`coalesce(sum(coalesce(${event_images.file_size}, 0)) filter (where ${isVideo}), 0)`.mapWith(Number),
+      imageCount: sql`count(*) filter (where not (${isVideo}))`.mapWith(Number),
+      videoCount: sql`count(*) filter (where ${isVideo})`.mapWith(Number),
     })
       .from(event_images)
       .where(and(
@@ -624,30 +631,15 @@ export class PostgreSQLStorage implements IStorage {
         eq(event_images.archived, false)
       ));
 
-    let imageBytes = 0;
-    let videoBytes = 0;
-    let imageCount = 0;
-    let videoCount = 0;
-
-    for (const row of results) {
-      const size = row.file_size || 0;
-      const ext = (row.file_extension || '').toLowerCase().replace('.', '');
-      
-      if (videoExtensions.includes(ext)) {
-        videoBytes += size;
-        videoCount++;
-      } else {
-        imageBytes += size;
-        imageCount++;
-      }
-    }
+    const imageBytes = row?.imageBytes ?? 0;
+    const videoBytes = row?.videoBytes ?? 0;
 
     return {
       imageBytes,
       videoBytes,
       totalBytes: imageBytes + videoBytes,
-      imageCount,
-      videoCount
+      imageCount: row?.imageCount ?? 0,
+      videoCount: row?.videoCount ?? 0
     };
   }
 
