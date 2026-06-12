@@ -7,6 +7,7 @@ import { emailService } from "./email-service";
 import { trackInitiateCheckout, trackPurchase } from "./meta-conversions";
 import { registerPrintRoutes, handlePrintCheckoutCompleted } from "./print/routes";
 import { verifySuperuser } from "./print/admin-auth";
+import { createSessionWithVippsFallback } from "./stripe-vipps";
 
 if (!process.env.STRIPE_SECRET_KEY) {
   throw new Error('Missing required Stripe secret: STRIPE_SECRET_KEY');
@@ -715,8 +716,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sessionData.allow_promotion_codes = true;
       }
 
-      const session = await stripe.checkout.sessions.create(sessionData);
-      
+      // Vipps for NOK-kjøpere (preview hos Stripe, best-effort med fallback).
+      // Samme land-logikk som /api/pricing-info, så valutaen vi låser matcher
+      // prisen kunden allerede så på siden. 'link' må eksplisitt med når vi
+      // setter payment_method_types manuelt — ellers forsvinner den fra
+      // checkout (dashboard-aktivert i dag). Wallets følger 'card'.
+      const headerCountry = (req.headers["x-vercel-ip-country"] as string | undefined)?.toUpperCase();
+      const bodyCountry = typeof buyerCountry === 'string' && buyerCountry ? buyerCountry : undefined;
+      const checkoutCountry = (bodyCountry || headerCountry || 'NO').toUpperCase();
+      const checkoutCurrency = getCurrencyForCountry(checkoutCountry, stripeData.currencyOptions);
+
+      const session = checkoutCurrency === 'nok'
+        ? await createSessionWithVippsFallback(stripe, sessionData, {
+            paymentMethodTypes: ['card', 'link', 'vipps'],
+            forceCurrency: 'nok',
+          })
+        : await stripe.checkout.sessions.create(sessionData);
+
       res.json({ clientSecret: session.client_secret });
     } catch (error: any) {
       console.error("Error creating checkout session:", error);

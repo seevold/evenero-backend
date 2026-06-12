@@ -21,6 +21,7 @@ import { verifySuperuser } from "./admin-auth";
 import { getPrintSettings, updatePrintSettings } from "./settings";
 import { currencyForCountry, isAnchorCurrency } from "./currency";
 import { uploadPreorderDesign, validateDesignDataUrl } from "./storage";
+import { createSessionWithVippsFallback } from "../stripe-vipps";
 import type { PrintProduct, PrintCategory, PrintAddon, PrintQtyVariant, PrintPricesByCurrency } from "@shared/schema";
 
 const ALLOWED_COUNTRIES_V1 = [
@@ -728,7 +729,7 @@ async function handleCheckout(req: Request, res: Response) {
 
   const cancelEventId = body.items.find((it) => it.sourceEventId)?.sourceEventId;
   const stripe = getStripe();
-  const session = await stripe.checkout.sessions.create({
+  const sessionParams: Stripe.Checkout.SessionCreateParams = {
     mode: "payment",
     payment_method_types: ["card"],
     line_items: lineItems,
@@ -750,7 +751,14 @@ async function handleCheckout(req: Request, res: Response) {
     cancel_url: cancelEventId
       ? `${body.returnBaseUrl}/manage/${cancelEventId}/templates`
       : `${body.returnBaseUrl}/`,
-  });
+  };
+  // Vipps for norske kunder (NOK-only hos Stripe, preview med fallback).
+  // Line-items er allerede i NOK når landet er NO — ingen valuta-lås trengs.
+  const session = stripeCurrency === "nok"
+    ? await createSessionWithVippsFallback(stripe, sessionParams, {
+        paymentMethodTypes: ["card", "vipps"],
+      })
+    : await stripe.checkout.sessions.create(sessionParams);
 
   // Lagre stripe_session_id på ordren for senere lookup
   await pool.query(
