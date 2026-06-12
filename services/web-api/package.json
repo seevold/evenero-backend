@@ -21,6 +21,7 @@
     "drizzle-zod": "^0.7.0",
     "express": "^4.21.2",
     "form-data": "^4.0.3",
+    "geoip-country": "^5.0.202605270000",
     "jsonwebtoken": "^9.0.3",
     "nanoid": "^5.1.5",
     "pdfkit": "^0.18.0",

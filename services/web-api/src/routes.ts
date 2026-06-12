@@ -8,6 +8,7 @@ import { trackInitiateCheckout, trackPurchase } from "./meta-conversions";
 import { registerPrintRoutes, handlePrintCheckoutCompleted } from "./print/routes";
 import { verifySuperuser } from "./print/admin-auth";
 import { createSessionWithVippsFallback } from "./stripe-vipps";
+import { countryFromRequest } from "./geo";
 
 if (!process.env.STRIPE_SECRET_KEY) {
   throw new Error('Missing required Stripe secret: STRIPE_SECRET_KEY');
@@ -436,14 +437,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const stripeData = await getStripePriceData();
 
-      // Country-prioritet: 1) request body (override fra frontend),
-      // 2) Vercel header (forwarded fra Vercel proxy), 3) NO som fallback.
-      // Frontend trenger ikke sende buyerCountry — backend detekterer fra Vercel.
-      const headerCountry = (req.headers["x-vercel-ip-country"] as string | undefined)?.toUpperCase();
-      const country = (buyerCountry || headerCountry || "NO").toUpperCase();
+      // Country-prioritet: 1) GeoIP på klient-IP (autoritativ — VPN/reisende
+      // får valuta etter hvor de ER, ikke hva nettleserens tidssone sier),
+      // 2) buyerCountry fra frontend (timezone/locale-gjetning — eneste
+      // signal i lokal dev der klient-IP er privat), 3) NO som fallback.
+      // NB: x-vercel-ip-country finnes ALDRI her — evenero.com er statisk
+      // eksport (output:'export') og kaller Cloud Run direkte uten proxy.
+      const ipCountry = countryFromRequest(req);
+      const country = (ipCountry || buyerCountry || "NO").toUpperCase();
       const currency = getCurrencyForCountry(country, stripeData.currencyOptions);
       const basePrice = stripeData.currencyOptions[currency] ?? stripeData.defaultAmount;
       const symbol = getSymbol(currency);
+      console.log(`💱 pricing-info: ${country} → ${currency} (ip=${ipCountry || "-"}, hint=${buyerCountry || "-"})`);
 
       let finalPrice = basePrice;
       let discount = null;
@@ -496,7 +501,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         couponApplied: !!appliedCoupon,
         couponCode: appliedCoupon ? couponCode : null,
         currency: currency.toUpperCase(),
-        currencySymbol: symbol
+        currencySymbol: symbol,
+        resolvedCountry: country
       });
     } catch (error: any) {
       console.error("Error fetching pricing info:", error);
@@ -515,14 +521,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { buyerCountry, customerEmail, couponCode, metaEventId, marketingConsent, fbp, fbc, attribution } = req.body;
 
+      // Land resolves med samme prioritet som /api/pricing-info (IP først,
+      // timezone-hint som fallback), slik at checkout-valutaen alltid matcher
+      // prisen kunden så på siden.
+      const ipCountry = countryFromRequest(req);
+      const bodyCountry = typeof buyerCountry === 'string' && buyerCountry ? buyerCountry : undefined;
+      const checkoutCountry = (ipCountry || bodyCountry || 'NO').toUpperCase();
+
       // Prepare metadata for tracking. marketing_consent lagres alltid (true/false)
       // så webhook-en senere kan gate Meta CAPI uten å gjette.
       const metadata: any = {
         marketing_consent: marketingConsent === true ? 'true' : 'false',
+        buyer_country: checkoutCountry,
       };
-      if (buyerCountry) {
-        metadata.buyer_country = buyerCountry;
-      }
       if (customerEmail) {
         metadata.customer_email = customerEmail;
       }
@@ -624,7 +635,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         payment_intent_data: {
           metadata: {
             ...(couponCode && { coupon_code: couponCode }),
-            ...(buyerCountry && { buyer_country: buyerCountry }),
+            buyer_country: checkoutCountry,
           }
         },
         automatic_tax: {
@@ -717,23 +728,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Vipps for NOK-kjøpere (preview hos Stripe, best-effort med fallback).
-      // Samme land-logikk som /api/pricing-info, så valutaen vi låser matcher
-      // prisen kunden allerede så på siden. Eksplisitt payment_method_types
-      // skrur av dashboard-styrte dynamiske metoder — lista under MÅ speile
-      // det dashboardet tilbyr for NOK i dag (card+klarna+link, verifisert
+      // checkoutCountry er resolved øverst i handleren (IP først — samme
+      // logikk som /api/pricing-info), så valutaen vi låser matcher prisen
+      // kunden allerede så på siden. Eksplisitt payment_method_types skrur av
+      // dashboard-styrte dynamiske metoder — lista under MÅ speile det
+      // dashboardet tilbyr for NOK i dag (card+klarna+link, verifisert
       // mot faktiske sessions 2026-06-12), ellers forsvinner metoder stille.
       // Wallets (Apple/Google Pay) følger 'card'.
-      const headerCountry = (req.headers["x-vercel-ip-country"] as string | undefined)?.toUpperCase();
-      const bodyCountry = typeof buyerCountry === 'string' && buyerCountry ? buyerCountry : undefined;
-      const checkoutCountry = (bodyCountry || headerCountry || 'NO').toUpperCase();
       const checkoutCurrency = getCurrencyForCountry(checkoutCountry, stripeData.currencyOptions);
+      console.log(`💱 checkout-session: ${checkoutCountry} → ${checkoutCurrency} (ip=${ipCountry || "-"}, hint=${buyerCountry || "-"})`);
 
+      // Ikke-NOK: lås presentment-valutaen eksplisitt til samme valuta som
+      // pricing-info viste. Uten lås kunne Stripes egen IP-deteksjon valgt en
+      // annen valuta enn siden (f.eks. faller Stripe tilbake til default-
+      // valutaen NOK når kundens lokalvaluta mangler i currency_options).
+      // getCurrencyForCountry returnerer kun valutaer som finnes på Price-en,
+      // så currency-parameteren er alltid gyldig.
       const session = checkoutCurrency === 'nok'
         ? await createSessionWithVippsFallback(stripe, sessionData, {
             paymentMethodTypes: ['card', 'klarna', 'link', 'vipps'],
             forceCurrency: 'nok',
           })
-        : await stripe.checkout.sessions.create(sessionData);
+        : await stripe.checkout.sessions.create({ ...sessionData, currency: checkoutCurrency });
 
       res.json({ clientSecret: session.client_secret });
     } catch (error: any) {
