@@ -59,3 +59,28 @@ export async function verifySuperuser(req: Request): Promise<SuperuserCheck> {
   }
   return { ok: true, status: 200, email };
 }
+
+/**
+ * Verifiserer JWT-en (samme som main-api utsteder) og returnerer e-posten i
+ * payloaden, eller null hvis token mangler/er ugyldig/JWT_SECRET ikke satt.
+ *
+ * Brukes for kunde-vendte print-endepunkter (ordre-status) der vi ikke krever
+ * superuser, men må vite HVEM som er innlogget for å autorisere mot ordren.
+ * Selve eierskaps-sjekken gjøres av caller — denne sier bare "gyldig innlogget
+ * bruker = X".
+ */
+export async function getAuthedEmail(req: Request): Promise<string | null> {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    console.error("[print-auth] JWT_SECRET ikke satt — kan ikke verifisere bruker");
+    return null;
+  }
+  const token = getBearer(req);
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, secret) as { email?: string };
+    return payload.email || null;
+  } catch {
+    return null;
+  }
+}
