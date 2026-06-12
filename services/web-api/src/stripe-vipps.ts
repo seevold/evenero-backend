@@ -23,6 +23,16 @@ export interface VippsSessionOptions {
   forceCurrency?: string;
 }
 
+// Når Stripe avviser Vipps-forsøket deterministisk (manglende beta-gate,
+// ikke-aktivert metode, ugyldig preview-versjon) er det meningsløst å prøve
+// på nytt på hver checkout — det koster et ekstra Stripe-rundtrip på
+// hoved-betalingsflyten. Vi husker avvisningen og prober på nytt etter
+// cooldown. Selvhelende: når Stripe åpner gaten for kontoen dukker Vipps
+// opp av seg selv innen én cooldown (eller instans-restart), uten deploy.
+// Transiente feil (nettverk/5xx/rate limit) setter IKKE cooldown.
+const VIPPS_RETRY_COOLDOWN_MS = 60 * 60 * 1000;
+let vippsDisabledUntil = 0;
+
 // Oppretter Checkout Session med Vipps; faller tilbake til `params` urørt
 // (dagens oppførsel) hvis Stripe avviser preview-forsøket. Checkout skal
 // aldri knekke fordi Vipps-gaten mangler eller previewen endres/avvikles.
@@ -31,6 +41,10 @@ export async function createSessionWithVippsFallback(
   params: Stripe.Checkout.SessionCreateParams,
   opts: VippsSessionOptions,
 ): Promise<Stripe.Checkout.Session> {
+  if (Date.now() < vippsDisabledUntil) {
+    return stripe.checkout.sessions.create(params);
+  }
+
   const previewParams: Record<string, unknown> = {
     ...params,
     payment_method_types: opts.paymentMethodTypes,
@@ -53,7 +67,17 @@ export async function createSessionWithVippsFallback(
     return session;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[vipps] Stripe avviste Vipps-session (${msg.slice(0, 200)}) — oppretter uten Vipps`);
+    // invalid_request_error = deterministisk (samme params → samme avslag),
+    // typisk "You do not have permission to pass this beta header" så lenge
+    // Stripe ikke har åpnet preview-gaten for kontoen → pause forsøkene.
+    if ((err as { type?: string })?.type === "StripeInvalidRequestError") {
+      vippsDisabledUntil = Date.now() + VIPPS_RETRY_COOLDOWN_MS;
+      console.warn(
+        `[vipps] Stripe avviste Vipps-session (${msg.slice(0, 200)}) — pauser Vipps-forsøk i ${Math.round(VIPPS_RETRY_COOLDOWN_MS / 60000)} min og oppretter uten Vipps`,
+      );
+    } else {
+      console.warn(`[vipps] Vipps-forsøk feilet transient (${msg.slice(0, 200)}) — oppretter uten Vipps`);
+    }
     return stripe.checkout.sessions.create(params);
   }
 }
