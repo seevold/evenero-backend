@@ -1350,6 +1350,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Endrings-probe for slideshow: {count, latest} med samme filter som
+  // /images-listen. Klienten poller denne (~50 bytes, indeksert aggregat)
+  // hvert 10.-30. s og henter full liste KUN når proben endres — i stedet
+  // for å hente hele listen hvert tick (var største DB-posten totalt).
+  registerBothPaths("get", "/events/:event_id/images-version", async (req, res) => {
+    const { event_id } = req.params;
+
+    if (!event_id) {
+      return res.status(400).json({ detail: "Event ID is required" });
+    }
+
+    try {
+      const version = await storage.getEventImagesVersion(event_id);
+      res.json(version);
+    } catch (error) {
+      res.status(500).json({ detail: "Internal server error" });
+    }
+  });
+
   registerBothPaths("get", "/events/:event_id/images-count", async (req, res) => {
     const { event_id } = req.params;
 

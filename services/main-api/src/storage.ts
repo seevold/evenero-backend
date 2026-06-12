@@ -50,6 +50,7 @@ export interface IStorage {
 
   // Event image methods
   getEventImages(eventId: string, includeArchived?: boolean, since?: Date): Promise<EventImage[]>;
+  getEventImagesVersion(eventId: string): Promise<{ count: number; latest: string | null }>;
   addEventImages(images: InsertEventImage[]): Promise<EventImage[]>;
   findExistingByTitleSize(
     eventId: string,
@@ -393,6 +394,31 @@ export class PostgreSQLStorage implements IStorage {
     return await db.select().from(event_images)
       .where(and(...conditions))
       .orderBy(desc(event_images.uploaded_at));
+  }
+
+  // Billig endrings-probe for slideshow-polling. MÅ ha NØYAKTIG samme filter
+  // som getEventImages(includeArchived=false) — proben skal endres hvis og
+  // bare hvis listen endres (ny opplasting, godkjent moderasjon, arkivering).
+  // Kjent blindsone: to motsatte endringer i samme polling-vindu som gir både
+  // uendret count og uendret max(uploaded_at) — selvhelende ved neste endring.
+  async getEventImagesVersion(eventId: string): Promise<{ count: number; latest: string | null }> {
+    const [row] = await db.select({
+      count: sql`count(*)`.mapWith(Number),
+      latest: sql`max(${event_images.uploaded_at})`,
+    })
+      .from(event_images)
+      .where(and(
+        eq(event_images.event_id, eventId),
+        eq(event_images.share_consent, true),
+        eq(event_images.moderation_status, 'approved'),
+        eq(event_images.archived, false)
+      ));
+
+    const latest = row?.latest ? new Date(row.latest as string | Date) : null;
+    return {
+      count: row?.count ?? 0,
+      latest: latest && !isNaN(latest.getTime()) ? latest.toISOString() : null,
+    };
   }
 
   async addEventImages(images: InsertEventImage[]): Promise<EventImage[]> {
