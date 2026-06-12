@@ -17,7 +17,7 @@ import { generateOrderNumber } from "./order-number";
 import { fulfillOrder, refreshShipmentsFromGelato, syncOrderFromGelato } from "./fulfillment";
 import { sendPrintOrderConfirmation, sendPrintOrderShipped } from "./email";
 import { formatOrderLineLabel } from "./format";
-import { verifySuperuser } from "./admin-auth";
+import { verifySuperuser, getAuthedEmail } from "./admin-auth";
 import { getPrintSettings, updatePrintSettings } from "./settings";
 import { currencyForCountry, isAnchorCurrency } from "./currency";
 import { uploadPreorderDesign, validateDesignDataUrl } from "./storage";
@@ -814,11 +814,50 @@ async function handleDesignUpload(req: Request, res: Response) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// GET /orders/:orderNumber — status-side data
+// Autorisering for kunde-vendt ordre-status.
+//
+// Ordrenummeret (EV-ÅÅÅÅ-NNNN) er sekvensielt og gjettbart, så det kan IKKE
+// fungere som tilgangsnøkkel. Status-siden er innlogget (ProtectedRoute), så vi
+// krever JWT og sjekker at den innloggede brukeren faktisk eier ordren:
+//   1) ordren er sendt til brukerens egen (verifiserte) innloggings-e-post, ELLER
+//   2) brukeren eier/co-hoster et event som ordrens items stammer fra.
+// source_event_id == events.event_id (string-IDen). Vi matcher også events.id
+// (uuid) defensivt i tilfelle eldre data lagret uuid-en. deleted_at filtreres
+// IKKE bort — eierskap til en ordre opphører ikke om eventet soft-slettes.
+async function userCanViewOrder(
+  email: string,
+  orderId: string,
+  customerEmail: string | null,
+): Promise<boolean> {
+  const lower = email.toLowerCase();
+  if (customerEmail && customerEmail.toLowerCase() === lower) return true;
+
+  const ev = await pool.query<{ event_owner: string | null; event_co_host: string | null }>(
+    `SELECT DISTINCT e.event_owner, e.event_co_host
+       FROM print_order_items oi
+       JOIN events e
+         ON e.event_id = oi.source_event_id OR e.id::text = oi.source_event_id
+      WHERE oi.order_id = $1`,
+    [orderId],
+  );
+  for (const r of ev.rows) {
+    if (r.event_owner && r.event_owner.toLowerCase() === lower) return true;
+    if (r.event_co_host) {
+      const cohosts = r.event_co_host.split(",").map((s) => s.trim().toLowerCase());
+      if (cohosts.includes(lower)) return true;
+    }
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// GET /orders/:orderNumber — status-side data (innlogget kunde)
 // ─────────────────────────────────────────────────────────────────────────
 
 async function handleGetOrder(req: Request, res: Response) {
   const orderNumber = req.params.orderNumber;
+  const email = await getAuthedEmail(req);
+  if (!email) return res.status(401).json({ error: "UNAUTHORIZED" });
   const order = await pool.query(
     `SELECT id, order_number, customer_email, status,
             total_minor, shipping_minor, currency,
@@ -831,6 +870,11 @@ async function handleGetOrder(req: Request, res: Response) {
     [orderNumber],
   );
   if (!order.rows[0]) return res.status(404).json({ error: "NOT_FOUND" });
+  if (!(await userCanViewOrder(email, order.rows[0].id, order.rows[0].customer_email))) {
+    // Samme 404 som "finnes ikke" — så et gjettbart ordrenr ikke kan brukes til
+    // å bekrefte at en ordre eksisterer (ingen enumererings-orakkel).
+    return res.status(404).json({ error: "NOT_FOUND" });
+  }
   const items = await pool.query(
     `SELECT oi.product_slug, oi.quantity, oi.unit_price_minor, oi.line_total_minor,
             p.display_name AS "displayName",
@@ -845,14 +889,32 @@ async function handleGetOrder(req: Request, res: Response) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// GET /orders/by-event/:eventId — kundens print-bestillinger for et event.
-// Returnerer kun ikke-sensitive felter (ingen e-post/adresse) — ordrenummeret
-// fungerer som tilgangsnøkkel til den fulle status-siden.
+// GET /orders/by-event/:eventId — innlogget eier/co-host av eventet.
+// Returnerer ikke-sensitive ordre-sammendrag (ingen e-post/adresse). eventId
+// er gjettbart (bruker-valgt streng), så vi krever JWT + at brukeren
+// eier/co-hoster eventet — ellers kunne hvem som helst liste et events ordrer.
 // ─────────────────────────────────────────────────────────────────────────
 
 async function handleGetOrdersByEvent(req: Request, res: Response) {
   const eventId = req.params.eventId;
   if (!eventId) return res.status(400).json({ error: "MISSING_EVENT_ID" });
+  const email = await getAuthedEmail(req);
+  if (!email) return res.status(401).json({ error: "UNAUTHORIZED" });
+
+  const lower = email.toLowerCase();
+  const ev = await pool.query<{ event_owner: string | null; event_co_host: string | null }>(
+    `SELECT event_owner, event_co_host FROM events WHERE event_id = $1 OR id::text = $1`,
+    [eventId],
+  );
+  const canAccess = ev.rows.some((r) => {
+    if (r.event_owner && r.event_owner.toLowerCase() === lower) return true;
+    if (r.event_co_host) {
+      return r.event_co_host.split(",").map((s) => s.trim().toLowerCase()).includes(lower);
+    }
+    return false;
+  });
+  if (!canAccess) return res.status(403).json({ error: "FORBIDDEN" });
+
   const rows = await pool.query(
     `SELECT DISTINCT o.order_number, o.status, o.total_minor, o.created_at,
             (SELECT COUNT(*)::int FROM print_order_items WHERE order_id = o.id) AS item_count
