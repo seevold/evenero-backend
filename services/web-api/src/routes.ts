@@ -718,9 +718,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Vipps for NOK-kjøpere (preview hos Stripe, best-effort med fallback).
       // Samme land-logikk som /api/pricing-info, så valutaen vi låser matcher
-      // prisen kunden allerede så på siden. 'link' må eksplisitt med når vi
-      // setter payment_method_types manuelt — ellers forsvinner den fra
-      // checkout (dashboard-aktivert i dag). Wallets følger 'card'.
+      // prisen kunden allerede så på siden. Eksplisitt payment_method_types
+      // skrur av dashboard-styrte dynamiske metoder — lista under MÅ speile
+      // det dashboardet tilbyr for NOK i dag (card+klarna+link, verifisert
+      // mot faktiske sessions 2026-06-12), ellers forsvinner metoder stille.
+      // Wallets (Apple/Google Pay) følger 'card'.
       const headerCountry = (req.headers["x-vercel-ip-country"] as string | undefined)?.toUpperCase();
       const bodyCountry = typeof buyerCountry === 'string' && buyerCountry ? buyerCountry : undefined;
       const checkoutCountry = (bodyCountry || headerCountry || 'NO').toUpperCase();
@@ -728,7 +730,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const session = checkoutCurrency === 'nok'
         ? await createSessionWithVippsFallback(stripe, sessionData, {
-            paymentMethodTypes: ['card', 'link', 'vipps'],
+            paymentMethodTypes: ['card', 'klarna', 'link', 'vipps'],
             forceCurrency: 'nok',
           })
         : await stripe.checkout.sessions.create(sessionData);
