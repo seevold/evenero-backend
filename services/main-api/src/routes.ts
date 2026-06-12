@@ -1227,17 +1227,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const events = await storage.getEventsByOwner(owner_email);
-      
-      // Add image count for each event
-      const eventsWithImageCount = await Promise.all(events.map(async (event) => {
-        const imageCount = await storage.getEventImageCount(event.event_id);
-        return {
-          ...event,
-          image_count: imageCount
-        };
-      }));
-      
-      res.json(eventsWithImageCount);
+
+      // Galleri-synlige counts + lagringsbruk for alle eventer i én batch-query.
+      // Dashboardet viser disse på event-kortene.
+      const statsByEvent = await storage.getEventsMediaStats(events.map(e => e.event_id));
+      const emptyStats = { image_count: 0, video_count: 0, contributor_count: 0, storage_used_bytes: 0 };
+
+      res.json(events.map(event => ({
+        ...event,
+        ...(statsByEvent.get(event.event_id) ?? emptyStats)
+      })));
     } catch (error) {
       res.status(500).json({ detail: "Internal server error" });
     }
@@ -1258,20 +1257,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ detail: "Invalid or expired token" });
       }
 
-      // Get events where user is a guest
+      // Get events where user is a guest. image_count-berikelsen er fjernet:
+      // ingen klient leste den, og den kostet én COUNT-query per event.
       const guestEvents = await storage.getGuestEventsByEmail(email);
-      
-      // Add image count for each event
-      const eventsWithDetails = await Promise.all(guestEvents.map(async (event) => {
-        const imageCount = await storage.getEventImageCount(event.event_id);
-        return {
-          ...event,
-          image_count: imageCount,
-          user_role: 'guest' as const
-        };
-      }));
-      
-      res.json(eventsWithDetails);
+
+      res.json(guestEvents.map(event => ({
+        ...event,
+        user_role: 'guest' as const
+      })));
     } catch (error) {
       console.error('[GUEST EVENTS] Error:', error);
       res.status(500).json({ detail: "Internal server error" });

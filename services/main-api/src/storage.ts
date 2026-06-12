@@ -25,6 +25,14 @@ export type VerifyPinResult =
   | { status: 'expired' }
   | { status: 'no-code' };
 
+// Galleri-synlig media-statistikk per event (se getEventsMediaStats).
+export interface EventMediaStats {
+  image_count: number;
+  video_count: number;
+  contributor_count: number;
+  storage_used_bytes: number;
+}
+
 export interface IStorage {
   // User methods
   getUser(id: string): Promise<User | undefined>;
@@ -59,6 +67,7 @@ export interface IStorage {
   updateShareConsent(imageIds: string[], consent: boolean): Promise<number>;
   getEventImageCount(eventId: string): Promise<number>;
   getEventContributorCount(eventId: string): Promise<number>;
+  getEventsMediaStats(eventIds: string[]): Promise<Map<string, EventMediaStats>>;
   deleteEventImages(eventId: string, imageIds: string[]): Promise<number>;
   getEventImagesByIds(imageIds: string[]): Promise<EventImage[]>;
   getArchivedImagesByIds(eventId: string, imageIds: string[]): Promise<EventImage[]>;
@@ -477,7 +486,7 @@ export class PostgreSQLStorage implements IStorage {
 
   async getEventContributorCount(eventId: string): Promise<number> {
     const [result] = await db.select({ 
-      count: sql`COUNT(DISTINCT ${event_images.uploaded_by})` 
+      count: sql`COUNT(DISTINCT ${event_images.uploaded_by})`
     })
       .from(event_images)
       .where(and(
@@ -486,6 +495,47 @@ export class PostgreSQLStorage implements IStorage {
         eq(event_images.archived, false)
       ));
     return Number(result?.count) || 0;
+  }
+
+  // Batch-statistikk for dashboard-kortene: alle eventers tall i ÉN query
+  // (events-by-owner gjorde tidligere én COUNT-query per event — N+1 mot
+  // pool-cap'en). Filteret er identisk med galleri-visningen
+  // (getEventImages/getImagesVersion: share_consent + approved + ikke
+  // arkivert) slik at tallene på kortet matcher det galleriet viser.
+  // Video-deteksjonen speiler getEventStorageUsage. Eventer uten synlig
+  // media får ingen rad — callere må falle tilbake til 0.
+  async getEventsMediaStats(eventIds: string[]): Promise<Map<string, EventMediaStats>> {
+    const stats = new Map<string, EventMediaStats>();
+    if (eventIds.length === 0) return stats;
+
+    const isVideo = sql`replace(lower(coalesce(${event_images.file_extension}, '')), '.', '') in ('mp4', 'mov', 'avi', 'webm', 'mkv', 'm4v', '3gp')`;
+
+    const rows = await db.select({
+      event_id: event_images.event_id,
+      image_count: sql`count(*) filter (where not (${isVideo}))`.mapWith(Number),
+      video_count: sql`count(*) filter (where ${isVideo})`.mapWith(Number),
+      contributor_count: sql`count(distinct ${event_images.uploaded_by})`.mapWith(Number),
+      storage_used_bytes: sql`coalesce(sum(coalesce(${event_images.file_size}, 0)), 0)`.mapWith(Number),
+    })
+      .from(event_images)
+      .where(and(
+        inArray(event_images.event_id, eventIds),
+        eq(event_images.share_consent, true),
+        eq(event_images.moderation_status, 'approved'),
+        eq(event_images.archived, false)
+      ))
+      .groupBy(event_images.event_id);
+
+    for (const row of rows) {
+      if (!row.event_id) continue;
+      stats.set(row.event_id, {
+        image_count: row.image_count ?? 0,
+        video_count: row.video_count ?? 0,
+        contributor_count: row.contributor_count ?? 0,
+        storage_used_bytes: row.storage_used_bytes ?? 0,
+      });
+    }
+    return stats;
   }
 
   async deleteEventImages(eventId: string, imageIds: string[]): Promise<number> {
