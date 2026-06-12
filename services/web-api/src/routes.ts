@@ -6,6 +6,7 @@ import { type InsertPayment, insertSupportRequestSchema } from "@shared/schema";
 import { emailService } from "./email-service";
 import { trackInitiateCheckout, trackPurchase } from "./meta-conversions";
 import { registerPrintRoutes, handlePrintCheckoutCompleted } from "./print/routes";
+import { verifySuperuser } from "./print/admin-auth";
 
 if (!process.env.STRIPE_SECRET_KEY) {
   throw new Error('Missing required Stripe secret: STRIPE_SECRET_KEY');
@@ -368,9 +369,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     res.json({ received: true });
   });
-  // Email service test endpoint (for debugging)
+  // Email service test endpoint (for debugging). Superuser-auth: avslører
+  // env-info (API-key-prefiks) og skal ikke være offentlig.
   app.get("/api/email-test", async (req, res) => {
     try {
+      const auth = await verifySuperuser(req);
+      if (!auth.ok) return res.status(auth.status).json({ error: "FORBIDDEN" });
+
       const hasApiKey = !!process.env.MAILGUN_API_KEY;
       const apiKeyPrefix = process.env.MAILGUN_API_KEY ? process.env.MAILGUN_API_KEY.substring(0, 8) + '...' : 'NOT SET';
       
@@ -809,9 +814,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Admin: Get all payments
+  // Admin: Get all payments. Superuser-auth: returnerer kunde-e-poster,
+  // beløp og Stripe-metadata for ALLE betalinger.
   app.get("/api/admin/payments", async (req, res) => {
     try {
+      const auth = await verifySuperuser(req);
+      if (!auth.ok) return res.status(auth.status).json({ error: "FORBIDDEN" });
+
       const payments = await storage.getAllPayments();
       res.json(payments);
     } catch (error: any) {
@@ -820,9 +829,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Debug: List all Stripe coupons and promotion codes
+  // Debug: List all Stripe coupons and promotion codes. Superuser-auth:
+  // promo-koder er i praksis rabatt-hemmeligheter.
   app.get("/api/debug/coupons", async (req, res) => {
     try {
+      const auth = await verifySuperuser(req);
+      if (!auth.ok) return res.status(auth.status).json({ error: "FORBIDDEN" });
+
       const [coupons, promotionCodes] = await Promise.all([
         stripe.coupons.list({ limit: 100 }),
         stripe.promotionCodes.list({ limit: 100 })
