@@ -727,29 +727,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sessionData.allow_promotion_codes = true;
       }
 
-      // Vipps for NOK-kjøpere (preview hos Stripe, best-effort med fallback).
-      // checkoutCountry er resolved øverst i handleren (IP først — samme
-      // logikk som /api/pricing-info), så valutaen vi låser matcher prisen
-      // kunden allerede så på siden. Eksplisitt payment_method_types skrur av
-      // dashboard-styrte dynamiske metoder — lista under MÅ speile det
-      // dashboardet tilbyr for NOK i dag (card+klarna+link, verifisert
-      // mot faktiske sessions 2026-06-12), ellers forsvinner metoder stille.
-      // Wallets (Apple/Google Pay) følger 'card'.
+      // Valuta-strategi: vi setter KUN eksplisitt currency for NOK-kjøpere,
+      // fordi Vipps (preview hos Stripe) krever NOK-presentment. For alt annet
+      // setter vi INGEN currency — da håndterer Stripe lokaliseringen selv:
+      //   • De manuelle currency_options (DKK/SEK/EUR/GBP/USD) overstyrer
+      //     Adaptive Pricing for sine valutaer → kunden får dine pene priser.
+      //   • Land utenfor de seks (PL/JP/CA…) konverteres av Adaptive Pricing
+      //     (på i dashboardet) til lokal valuta + låser opp lokale
+      //     betalingsmetoder (BLIK, iDEAL, P24 …).
+      // Å sette currency eksplisitt ville skrudd AV begge deler for den
+      // sessionen (Stripe-docs: "you can override this behavior by specifying
+      // a currency" + "manually defined prices override Adaptive Pricing").
+      // checkoutCurrency brukes derfor BARE til å avgjøre Vipps-grenen.
+      //
+      // payment_method_types (NOK-grenen) skrur av dashboard-styrte dynamiske
+      // metoder — lista MÅ speile det dashboardet tilbyr for NOK i dag
+      // (card+klarna+link, verifisert mot faktiske sessions 2026-06-12),
+      // ellers forsvinner metoder stille. Wallets (Apple/Google Pay) følger 'card'.
       const checkoutCurrency = getCurrencyForCountry(checkoutCountry, stripeData.currencyOptions);
-      console.log(`💱 checkout-session: ${checkoutCountry} → ${checkoutCurrency} (ip=${ipCountry || "-"}, hint=${buyerCountry || "-"})`);
+      const isNok = checkoutCurrency === 'nok';
+      console.log(`💱 checkout-session: ${checkoutCountry} → ${isNok ? 'nok (Vipps-sti, låst)' : 'Stripe auto (manual prices + Adaptive Pricing)'} (ip=${ipCountry || "-"}, hint=${buyerCountry || "-"})`);
 
-      // Ikke-NOK: lås presentment-valutaen eksplisitt til samme valuta som
-      // pricing-info viste. Uten lås kunne Stripes egen IP-deteksjon valgt en
-      // annen valuta enn siden (f.eks. faller Stripe tilbake til default-
-      // valutaen NOK når kundens lokalvaluta mangler i currency_options).
-      // getCurrencyForCountry returnerer kun valutaer som finnes på Price-en,
-      // så currency-parameteren er alltid gyldig.
-      const session = checkoutCurrency === 'nok'
+      const session = isNok
         ? await createSessionWithVippsFallback(stripe, sessionData, {
             paymentMethodTypes: ['card', 'klarna', 'link', 'vipps'],
             forceCurrency: 'nok',
           })
-        : await stripe.checkout.sessions.create({ ...sessionData, currency: checkoutCurrency });
+        : await stripe.checkout.sessions.create(sessionData);
 
       res.json({ clientSecret: session.client_secret });
     } catch (error: any) {
